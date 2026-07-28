@@ -1,7 +1,8 @@
 """
 Primary Dockable MainWindow for Hedit Pro.
 Arranges panels in Premiere Pro workspace layout using QDockWidgets and QTabWidget.
-Connects signals across Media Pool, Source Monitor, Program Monitor, VU Meter, Effect Controls, and Timeline.
+Connects signals across Media Pool, Source Monitor, Program Monitor, VU Meter, Effect Controls, Lumetri Color, and Timeline.
+Includes Export Media Dialog (Ctrl+M).
 """
 
 from PySide6.QtWidgets import (
@@ -19,6 +20,7 @@ from gui.widgets.timeline.canvas import TimelineCanvasWidget
 from gui.widgets.media_pool.browser import MediaPoolWidget
 from gui.widgets.inspector.transform import EffectControlsWidget
 from gui.widgets.color.wheels import LumetriColorWidget
+from gui.widgets.export_dialog import ExportDialog
 
 
 class MainWindow(QMainWindow):
@@ -58,6 +60,7 @@ class MainWindow(QMainWindow):
         import_media.triggered.connect(self.on_import_media_action)
         file_menu.addSeparator()
         export_video = file_menu.addAction("Export Media... (Ctrl+M)")
+        export_video.triggered.connect(self.on_open_export_dialog)
         file_menu.addSeparator()
         exit_act = file_menu.addAction("Exit")
         exit_act.triggered.connect(self.close)
@@ -156,6 +159,10 @@ class MainWindow(QMainWindow):
         self.shortcut_space = QShortcut(QKeySequence(Qt.Key_Space), self)
         self.shortcut_space.activated.connect(self._toggle_program_play)
 
+        # Export Media Shortcut: Ctrl+M
+        self.shortcut_export = QShortcut(QKeySequence("Ctrl+M"), self)
+        self.shortcut_export.activated.connect(self.on_open_export_dialog)
+
         # J-K-L Shuttle Navigation
         QShortcut(QKeySequence("j"), self).activated.connect(self._shuttle_j)
         QShortcut(QKeySequence("k"), self).activated.connect(self._shuttle_k)
@@ -210,3 +217,7 @@ class MainWindow(QMainWindow):
 
     def on_import_media_action(self):
         self.media_pool.on_import_click()
+
+    def on_open_export_dialog(self):
+        dlg = ExportDialog(total_sequence_frames=1800, parent=self)
+        dlg.exec()
