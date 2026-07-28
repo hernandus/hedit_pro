@@ -4,17 +4,171 @@ Media Pool / Project Panel Widget (Premiere Pro style asset browser).
 
 import os
 import cv2
+import subprocess
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTreeView, QHeaderView, QFileDialog, QMenu, QToolButton, QMessageBox,
     QAbstractItemView, QDockWidget
 )
-from PySide6.QtCore import Qt, Signal, QSize, QModelIndex
-from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction, QKeySequence, QShortcut
+from PySide6.QtCore import Qt, Signal, QSize, QModelIndex, QPointF
+from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction, QKeySequence, QShortcut, QColor, QPen, QPolygonF, QCursor
 
 from gui.utils.timecode import frames_to_timecode
+from gui.theme import (
+    COLOR_BG_DARK, COLOR_BG_HOVER, COLOR_BG_SELECTED, COLOR_DIVIDER,
+    COLOR_TEXT_PRIMARY, COLOR_TEXT_MUTED, COLOR_TEXT_REGULAR, TREE_VIEW_QSS
+)
 
 ICONS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../Interface_elements"))
+
+
+def has_audio_stream(path: str) -> bool:
+    """Checks via ffprobe whether a video media file contains audio streams."""
+    if not path or not os.path.exists(path):
+        return True  # Default to True for sample placeholder items if file doesn't exist
+    try:
+        cmd = [
+            'ffprobe', '-v', 'error',
+            '-select_streams', 'a',
+            '-show_entries', 'stream=codec_type',
+            '-of', 'csv=p=0',
+            path
+        ]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=2)
+        return bool(result.stdout.strip())
+    except Exception:
+        return True
+
+
+def get_media_metadata(path: str):
+    """Extracts (fps_str, video_res_str, audio_info_str, status_str) for a given media file path."""
+    if not path or not os.path.exists(path):
+        return ("25 fps", "1920x1080", "48000Hz 16Bit Stereo", "Online") if not path else ("", "", "", "Offline")
+
+    status_str = "Online"
+    fps_str = ""
+    video_res_str = ""
+    audio_info_str = ""
+
+    ext = os.path.splitext(path)[1].lower()
+    is_video = ext in ['.mp4', '.mkv', '.mov', '.avi']
+    is_audio = ext in ['.mp3', '.wav', '.aac', '.flac', '.m4a']
+
+    if is_video:
+        try:
+            cap = cv2.VideoCapture(path)
+            if cap.isOpened():
+                fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+                fps_int = int(round(fps))
+                fps_str = f"{fps_int} fps" if abs(fps - fps_int) < 0.05 else f"{fps:.2f} fps"
+                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                if w > 0 and h > 0:
+                    video_res_str = f"{w}x{h}"
+                cap.release()
+        except Exception:
+            fps_str = "25 fps"
+
+    if is_video or is_audio:
+        try:
+            cmd = [
+                'ffprobe', '-v', 'error',
+                '-select_streams', 'a:0',
+                '-show_entries', 'stream=sample_rate,channels,bits_per_raw_sample',
+                '-of', 'csv=p=0',
+                path
+            ]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=2)
+            out = res.stdout.strip()
+            if out:
+                parts = [p.strip() for p in out.split(',') if p.strip()]
+                if len(parts) >= 2:
+                    sr = parts[0]
+                    ch = int(parts[1]) if parts[1].isdigit() else 2
+                    ch_str = "Stereo" if ch == 2 else ("Mono" if ch == 1 else f"{ch}Ch")
+                    bit_str = f"{parts[2]}Bit " if (len(parts) >= 3 and parts[2].isdigit()) else "16Bit "
+                    audio_info_str = f"{sr}Hz {bit_str}{ch_str}"
+                elif len(parts) == 1:
+                    audio_info_str = f"{parts[0]}Hz"
+        except Exception:
+            pass
+
+    return fps_str, video_res_str, audio_info_str, status_str
+
+
+class ProjectHeaderView(QHeaderView):
+    """Custom header view positioning sort arrows immediately after text label."""
+
+    def __init__(self, orientation=Qt.Horizontal, parent=None):
+        super().__init__(orientation, parent)
+        self.setMouseTracking(True)
+
+    def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
+        self.viewport().update()
+
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        self.viewport().update()
+
+    def paintSection(self, painter, rect, logicalIndex):
+        if not rect.isValid():
+            return
+
+        painter.save()
+
+        mouse_pos = self.mapFromGlobal(QCursor.pos())
+        is_hovered = rect.contains(mouse_pos)
+
+        bg_color = QColor(COLOR_BG_HOVER) if is_hovered else QColor(COLOR_BG_DARK)
+        painter.fillRect(rect, bg_color)
+
+        border_pen = QPen(QColor(COLOR_DIVIDER), 1)
+        painter.setPen(border_pen)
+        painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+
+        if is_hovered:
+            painter.drawLine(rect.topLeft(), rect.bottomLeft())
+            painter.drawLine(rect.topRight(), rect.bottomRight())
+
+        model = self.model()
+        text = str(model.headerData(logicalIndex, self.orientation(), Qt.DisplayRole) or "")
+
+        font = self.font()
+        font.setPointSize(9)
+        painter.setFont(font)
+        painter.setPen(QColor(COLOR_TEXT_PRIMARY if is_hovered else COLOR_TEXT_MUTED))
+
+        fm = painter.fontMetrics()
+        text_width = fm.horizontalAdvance(text)
+
+        padding_left = 18 if logicalIndex == 0 else 8
+        text_x = rect.x() + padding_left
+        text_y = rect.y() + (rect.height() + fm.ascent() - fm.descent()) // 2
+
+        painter.drawText(text_x, text_y, text)
+
+        if self.isSortIndicatorShown() and self.sortIndicatorSection() == logicalIndex:
+            arrow_size = 5
+            arrow_x = text_x + text_width + 6
+            arrow_center_y = rect.y() + rect.height() // 2
+
+            painter.setBrush(QColor(COLOR_TEXT_PRIMARY if is_hovered else COLOR_TEXT_MUTED))
+            painter.setPen(Qt.NoPen)
+
+            poly = QPolygonF()
+            if self.sortIndicatorOrder() == Qt.AscendingOrder:
+                poly.append(QPointF(arrow_x, arrow_center_y + 2))
+                poly.append(QPointF(arrow_x + arrow_size, arrow_center_y + 2))
+                poly.append(QPointF(arrow_x + arrow_size / 2.0, arrow_center_y - 3))
+            else:
+                poly.append(QPointF(arrow_x, arrow_center_y - 2))
+                poly.append(QPointF(arrow_x + arrow_size, arrow_center_y - 2))
+                poly.append(QPointF(arrow_x + arrow_size / 2.0, arrow_center_y + 3))
+
+            painter.drawPolygon(poly)
+
+        painter.restore()
 
 
 class ProjectTreeView(QTreeView):
@@ -29,13 +183,15 @@ class ProjectTreeView(QTreeView):
 
 
 class MediaPoolWidget(QWidget):
-    """Project Panel for managing imported media files, bins, and assets."""
+    """
+    Main Media Pool / Project Panel Widget containing hierarchy, asset details and controls.
+    """
 
+    media_double_clicked = Signal(str)
     media_imported = Signal(str)
-    media_double_clicked = Signal(str)  # Emits file path when double clicked
-    media_removed = Signal(str)         # Emits file path when item is deleted
+    media_removed = Signal(str)
 
-    def __init__(self, parent=None, project_name="sample movie name"):
+    def __init__(self, project_name="sample movie name", parent=None):
         super().__init__(parent)
         self.project_name = project_name
         self._init_icons()
@@ -55,54 +211,39 @@ class MediaPoolWidget(QWidget):
 
         # Tree View for Media Assets & Bins
         self.tree_view = ProjectTreeView()
-        self.model = QStandardItemModel(0, 4)
-        self.model.setHorizontalHeaderLabels(["Name", "Framerate", "Path", "IsFolder"])
+        self.header_view = ProjectHeaderView(Qt.Horizontal, self.tree_view)
+        self.tree_view.setHeader(self.header_view)
+
+        self.model = QStandardItemModel(0, 7)
+        self.model.setHorizontalHeaderLabels(["Name", "Framerate", "Video", "Audio", "Status", "Path", "IsFolder"])
 
         self.tree_view.setModel(self.model)
         self.tree_view.setIconSize(QSize(16, 16))
+        self.tree_view.setIndentation(14)
 
-        # Configure columns
+        # Configure columns & header sorting/resizing
         header = self.tree_view.header()
-        header.setSectionResizeMode(0, QHeaderView.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.tree_view.setColumnHidden(2, True)  # Path
-        self.tree_view.setColumnHidden(3, True)  # IsFolder
+        header.setSectionsClickable(True)
+        header.setStretchLastSection(True)
 
-        # Style tree view to match reference PNG (#1d1d1d background, horizontal dividers #141414)
-        self.tree_view.setStyleSheet("""
-            QTreeView {
-                background-color: #1d1d1d;
-                color: #d4d4d4;
-                border: none;
-                font-size: 12px;
-                outline: 0;
-            }
-            QTreeView::branch {
-                background-color: #1d1d1d;
-            }
-            QTreeView::item {
-                height: 24px;
-                padding: 2px 4px;
-                border-bottom: 1px solid #141414;
-                border-right: none;
-            }
-            QTreeView::item:selected {
-                background-color: #2680eb;
-                color: #ffffff;
-            }
-            QTreeView::item:hover:!selected {
-                background-color: #242424;
-            }
-            QHeaderView::section {
-                background-color: #1d1d1d;
-                color: #a0a0a0;
-                padding: 4px 8px;
-                font-size: 11px;
-                font-weight: normal;
-                border: none;
-                border-bottom: 1px solid #141414;
-            }
-        """)
+        # Set all visible columns to Interactive so users can drag borders left/right to resize
+        for col_idx in range(5):
+            header.setSectionResizeMode(col_idx, QHeaderView.Interactive)
+
+        # Set initial default column widths
+        header.resizeSection(0, 180)  # Name
+        header.resizeSection(1, 75)   # Framerate
+        header.resizeSection(2, 95)   # Video
+        header.resizeSection(3, 140)  # Audio
+        header.resizeSection(4, 75)   # Status
+
+        header.setSortIndicatorShown(True)
+        self.tree_view.setSortingEnabled(True)
+
+        self.tree_view.setColumnHidden(5, True)  # Path
+        self.tree_view.setColumnHidden(6, True)  # IsFolder
+
+        self.tree_view.setStyleSheet(TREE_VIEW_QSS)
 
         self.tree_view.setAlternatingRowColors(False)
         self.tree_view.setExpandsOnDoubleClick(True)
@@ -136,7 +277,7 @@ class MediaPoolWidget(QWidget):
         # Bottom toolbar with action icons on the right
         bottom_bar = QWidget()
         bottom_bar.setFixedHeight(28)
-        bottom_bar.setStyleSheet("background-color: #1d1d1d; border-top: 1px solid #141414;")
+        bottom_bar.setStyleSheet("background-color: #1D1D1D; border-top: 1px solid #0E0E0E;")
         bottom_layout = QHBoxLayout(bottom_bar)
         bottom_layout.setContentsMargins(6, 2, 8, 2)
         bottom_layout.setSpacing(6)
@@ -205,13 +346,22 @@ class MediaPoolWidget(QWidget):
             item_fps = QStandardItem("25 fps")
             item_fps.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
 
+            item_video = QStandardItem("1920x1080")
+            item_video.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+
+            item_audio = QStandardItem("48000Hz 16Bit Stereo")
+            item_audio.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+
+            item_status = QStandardItem("Online")
+            item_status.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+
             item_path = QStandardItem("")
             item_path.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
 
             item_is_bin = QStandardItem("False")
             item_is_bin.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
 
-            footage_item.appendRow([item_name, item_fps, item_path, item_is_bin])
+            footage_item.appendRow([item_name, item_fps, item_video, item_audio, item_status, item_path, item_is_bin])
 
         self.tree_view.expand(footage_item.index())
 
@@ -232,12 +382,12 @@ class MediaPoolWidget(QWidget):
             if item:
                 if item.column() != 0:
                     item = self.model.item(item.row(), 0)
-                is_folder_item = self.model.item(item.row(), 3)
+                is_folder_item = self.model.item(item.row(), 6)
                 if is_folder_item and is_folder_item.text() == "True":
                     return item
                 elif item.parent():
                     parent = item.parent()
-                    parent_is_folder = parent.child(parent.row(), 3) if parent.parent() else self.model.item(parent.row(), 3)
+                    parent_is_folder = parent.child(parent.row(), 6) if parent.parent() else self.model.item(parent.row(), 6)
                     if parent_is_folder and parent_is_folder.text() == "True":
                         return parent
         return None
@@ -252,13 +402,22 @@ class MediaPoolWidget(QWidget):
         folder_fps = QStandardItem("")
         folder_fps.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
 
+        folder_video = QStandardItem("")
+        folder_video.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+
+        folder_audio = QStandardItem("")
+        folder_audio.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+
+        folder_status = QStandardItem("")
+        folder_status.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+
         folder_path = QStandardItem("")
         folder_path.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
 
         folder_is_bin = QStandardItem("True")
         folder_is_bin.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
 
-        row_items = [folder_item, folder_fps, folder_path, folder_is_bin]
+        row_items = [folder_item, folder_fps, folder_video, folder_audio, folder_status, folder_path, folder_is_bin]
 
         if parent_item:
             parent_item.appendRow(row_items)
@@ -281,24 +440,18 @@ class MediaPoolWidget(QWidget):
         name = os.path.basename(path)
         ext = os.path.splitext(name)[1].lower()
 
-        fps_str = ""
+        fps_str, video_res_str, audio_info_str, status_str = get_media_metadata(path)
+
         is_video = ext in ['.mp4', '.mkv', '.mov', '.avi']
         is_audio = ext in ['.mp3', '.wav', '.aac', '.flac', '.m4a']
-
-        if is_video:
-            try:
-                cap = cv2.VideoCapture(path)
-                if cap.isOpened():
-                    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-                    fps_int = int(round(fps))
-                    fps_str = f"{fps_int} fps" if abs(fps - fps_int) < 0.05 else f"{fps:.2f} fps"
-                    cap.release()
-            except Exception:
-                fps_str = "25 fps"
+        has_audio = bool(audio_info_str) if is_video else False
 
         item_name = QStandardItem(name)
         if is_video:
-            item_name.setIcon(self.icon_video_audio)
+            if has_audio:
+                item_name.setIcon(self.icon_video_audio)
+            else:
+                item_name.setIcon(self.icon_video)
         elif is_audio:
             item_name.setIcon(self.icon_audio)
         else:
@@ -308,13 +461,22 @@ class MediaPoolWidget(QWidget):
         item_fps = QStandardItem(fps_str)
         item_fps.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
 
+        item_video = QStandardItem(video_res_str)
+        item_video.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+
+        item_audio = QStandardItem(audio_info_str)
+        item_audio.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+
+        item_status = QStandardItem(status_str)
+        item_status.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+
         item_path = QStandardItem(path)
         item_path.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
 
         item_is_bin = QStandardItem("False")
         item_is_bin.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
 
-        row_items = [item_name, item_fps, item_path, item_is_bin]
+        row_items = [item_name, item_fps, item_video, item_audio, item_status, item_path, item_is_bin]
 
         if parent_item:
             parent_item.appendRow(row_items)
@@ -323,11 +485,11 @@ class MediaPoolWidget(QWidget):
             self.model.appendRow(row_items)
 
     def _on_item_double_clicked(self, index):
-        col2_path_idx = index.siblingAtColumn(2)
-        col3_bin_idx = index.siblingAtColumn(3)
+        col5_path_idx = index.siblingAtColumn(5)
+        col6_bin_idx = index.siblingAtColumn(6)
 
-        is_bin_item = self.model.itemFromIndex(col3_bin_idx)
-        path_item = self.model.itemFromIndex(col2_path_idx)
+        is_bin_item = self.model.itemFromIndex(col6_bin_idx)
+        path_item = self.model.itemFromIndex(col5_path_idx)
 
         # If it is not a bin, load the clip into Source Monitor
         if not (is_bin_item and is_bin_item.text() == "True"):
@@ -384,12 +546,12 @@ class MediaPoolWidget(QWidget):
 
             if parent_index.isValid():
                 parent_item = self.model.itemFromIndex(parent_index)
-                path_item = parent_item.child(row, 2)
+                path_item = parent_item.child(row, 5)
                 if path_item and path_item.text():
                     self.media_removed.emit(path_item.text())
                 parent_item.removeRow(row)
             else:
-                path_item = self.model.item(row, 2)
+                path_item = self.model.item(row, 5)
                 if path_item and path_item.text():
                     self.media_removed.emit(path_item.text())
                 self.model.removeRow(row)
