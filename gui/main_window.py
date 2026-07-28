@@ -107,8 +107,8 @@ class MainWindow(QMainWindow):
 
     def setup_docks(self):
         # 1. Project Panel / Media Pool Dock (Bottom Left)
-        self.dock_media = QDockWidget("Project: Untitled", self)
-        self.media_pool = MediaPoolWidget()
+        self.media_pool = MediaPoolWidget(project_name="sample movie name")
+        self.dock_media = QDockWidget(f"Project: {self.media_pool.project_name}", self)
         self.dock_media.setWidget(self.media_pool)
 
         # 2. Source Monitor & Effect Controls Tabbed Dock (Top Left)

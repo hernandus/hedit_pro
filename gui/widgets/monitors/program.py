@@ -9,10 +9,12 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QSlider, QComboBox
 )
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer, QUrl
 from PySide6.QtGui import QFont, QImage, QPixmap
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
 from gui.utils.timecode import frames_to_timecode
+from gui.widgets.monitors.viewport import VideoViewportWidget
 
 
 class ProgramMonitorWidget(QWidget):
@@ -31,10 +33,17 @@ class ProgramMonitorWidget(QWidget):
 
         self.sequence_model = None
         self.caps = {}
-        self.current_pixmap = None
+        self.current_audio_path = None
 
-        # Playback timer
+        # Synchronized Audio Output Engine
+        self.audio_output = QAudioOutput(self)
+        self.audio_output.setVolume(1.0)
+        self.player = QMediaPlayer(self)
+        self.player.setAudioOutput(self.audio_output)
+
+        # Playback timer (Microsecond precise timer)
         self.play_timer = QTimer(self)
+        self.play_timer.setTimerType(Qt.PreciseTimer)
         self.play_timer.setInterval(int(1000 / self.fps))
         self.play_timer.timeout.connect(self._on_timer_tick)
 
@@ -50,22 +59,8 @@ class ProgramMonitorWidget(QWidget):
         self.title_label.setStyleSheet("color: #00ffcc; font-weight: bold; font-size: 11px;")
         layout.addWidget(self.title_label)
 
-        # Video Viewport Frame
-        self.viewport = QFrame()
-        self.viewport.setStyleSheet("background-color: #000000; border: 1px solid #282828;")
-        self.viewport_layout = QVBoxLayout(self.viewport)
-        self.viewport_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.video_display = QLabel()
-        self.video_display.setAlignment(Qt.AlignCenter)
-        self.video_display.setStyleSheet("background-color: #000000;")
-        self.viewport_layout.addWidget(self.video_display)
-
-        self.placeholder_label = QLabel("PROGRAM MONITOR (SEQUENCE OUTPUT)")
-        self.placeholder_label.setAlignment(Qt.AlignCenter)
-        self.placeholder_label.setStyleSheet("color: #00ffcc; font-weight: bold; font-size: 13px;")
-        self.viewport_layout.addWidget(self.placeholder_label)
-
+        # Video Viewport Frame Canvas
+        self.viewport = VideoViewportWidget(placeholder_text="PROGRAM MONITOR (SEQUENCE OUTPUT)")
         layout.addWidget(self.viewport, stretch=1)
 
         # Playhead Seek Slider
@@ -150,16 +145,21 @@ class ProgramMonitorWidget(QWidget):
         self.is_playing = True
         interval = max(5, int(1000 / (self.fps * abs(self.playback_speed))))
         self.play_timer.setInterval(interval)
+
+        if self.current_audio_path and self.playback_speed == 1.0:
+            self.player.play()
+
         self.play_timer.start()
 
     def stop_playback(self):
         self.is_playing = False
+        self.player.pause()
         self.play_timer.stop()
 
     def toggle_loop(self, checked: bool):
         self.loop_enabled = checked
 
-    def render_sequence_frame(self, frame_num: int):
+    def render_sequence_frame(self, frame_num: int, force_seek: bool = False):
         """Render active timeline sequence video frame at specified sequence frame index."""
         if not self.sequence_model:
             return
@@ -174,6 +174,10 @@ class ProgramMonitorWidget(QWidget):
 
         if active_clip and os.path.exists(active_clip.file_path):
             file_path = active_clip.file_path
+            if self.current_audio_path != file_path:
+                self.current_audio_path = file_path
+                self.player.setSource(QUrl.fromLocalFile(file_path))
+
             if file_path not in self.caps:
                 cap = cv2.VideoCapture(file_path)
                 if cap.isOpened():
@@ -182,38 +186,25 @@ class ProgramMonitorWidget(QWidget):
             cap = self.caps.get(file_path)
             if cap and cap.isOpened():
                 clip_frame = (frame_num - active_clip.start_frame) + active_clip.mark_in
-                cap.set(cv2.CAP_PROP_POS_FRAMES, clip_frame)
+                curr_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+                if force_seek or curr_pos != clip_frame:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, clip_frame)
+                    if self.is_playing and self.playback_speed == 1.0:
+                        pos_ms = int((clip_frame / active_clip.fps) * 1000)
+                        self.player.setPosition(pos_ms)
+                
                 ret, frame = cap.read()
                 if ret and frame is not None:
                     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     h, w, ch = rgb_frame.shape
                     qimg = QImage(rgb_frame.data, w, h, w * ch, QImage.Format_RGB888)
                     pixmap = QPixmap.fromImage(qimg)
-                    self.current_pixmap = pixmap
-
-                    self.placeholder_label.hide()
-                    self.video_display.show()
-                    self._update_display_pixmap()
+                    self.viewport.set_pixmap(pixmap)
                     return
 
         # Gap or no clip
-        self.current_pixmap = None
-        self.video_display.clear()
-        self.placeholder_label.show()
-        self.placeholder_label.setText("PROGRAM MONITOR (EMPTY TIMELINE GAP)")
-
-    def _update_display_pixmap(self):
-        if self.current_pixmap and not self.current_pixmap.isNull():
-            vp_size = self.viewport.size()
-            if vp_size.width() > 10 and vp_size.height() > 10:
-                scaled = self.current_pixmap.scaled(
-                    vp_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
-                )
-                self.video_display.setPixmap(scaled)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._update_display_pixmap()
+        self.player.pause()
+        self.viewport.clear_video("PROGRAM MONITOR (EMPTY TIMELINE GAP)")
 
     def seek_to_frame(self, frame: int):
         self.current_frame = max(0, min(self.total_sequence_frames, frame))
@@ -221,14 +212,12 @@ class ProgramMonitorWidget(QWidget):
         self.seek_slider.setValue(self.current_frame)
         self.seek_slider.blockSignals(False)
         self.tc_label.setText(frames_to_timecode(self.current_frame, self.fps))
-        self.render_sequence_frame(self.current_frame)
+        self.render_sequence_frame(self.current_frame, force_seek=True)
         self.position_changed.emit(self.current_frame)
 
     def _on_slider_moved(self, value: int):
-        self.current_frame = value
-        self.tc_label.setText(frames_to_timecode(self.current_frame, self.fps))
-        self.render_sequence_frame(self.current_frame)
-        self.position_changed.emit(self.current_frame)
+        if not self.is_playing:
+            self.seek_to_frame(value)
 
     def _on_timer_tick(self):
         step = 1 if self.playback_speed > 0 else -1
@@ -245,12 +234,22 @@ class ProgramMonitorWidget(QWidget):
             else:
                 self.shuttle_stop()
         else:
-            self.seek_to_frame(next_frame)
+            self.current_frame = next_frame
+            self.seek_slider.blockSignals(True)
+            self.seek_slider.setValue(self.current_frame)
+            self.seek_slider.blockSignals(False)
+            self.tc_label.setText(frames_to_timecode(self.current_frame, self.fps))
+            self.render_sequence_frame(self.current_frame, force_seek=(self.playback_speed != 1.0))
+            self.position_changed.emit(self.current_frame)
 
     def closeEvent(self, event):
         for cap in self.caps.values():
             if cap:
                 cap.release()
         self.caps.clear()
+        self.player.stop()
         super().closeEvent(event)
+
+
+
 

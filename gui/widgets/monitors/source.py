@@ -9,10 +9,12 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QSlider, QStyle
 )
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer, QUrl
 from PySide6.QtGui import QFont, QColor, QImage, QPixmap
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
 from gui.utils.timecode import frames_to_timecode
+from gui.widgets.monitors.viewport import VideoViewportWidget
 from core.logger import get_logger
 
 logger = get_logger()
@@ -35,10 +37,16 @@ class SourceMonitorWidget(QWidget):
         self.clip_data = None
 
         self.cap = None
-        self.current_pixmap = None
 
-        # Playback timer
+        # Synchronized Audio Output Engine
+        self.audio_output = QAudioOutput(self)
+        self.audio_output.setVolume(1.0)
+        self.player = QMediaPlayer(self)
+        self.player.setAudioOutput(self.audio_output)
+
+        # Playback timer (Microsecond precise timer for zero-lag playback)
         self.play_timer = QTimer(self)
+        self.play_timer.setTimerType(Qt.PreciseTimer)
         self.play_timer.setInterval(int(1000 / self.fps))
         self.play_timer.timeout.connect(self._on_timer_tick)
 
@@ -54,22 +62,8 @@ class SourceMonitorWidget(QWidget):
         self.title_label.setStyleSheet("color: #888888; font-weight: bold; font-size: 11px;")
         layout.addWidget(self.title_label)
 
-        # Video Viewport Frame
-        self.viewport = QFrame()
-        self.viewport.setStyleSheet("background-color: #000000; border: 1px solid #282828;")
-        self.viewport_layout = QVBoxLayout(self.viewport)
-        self.viewport_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.video_display = QLabel()
-        self.video_display.setAlignment(Qt.AlignCenter)
-        self.video_display.setStyleSheet("background-color: #000000;")
-        self.viewport_layout.addWidget(self.video_display)
-
-        self.placeholder_label = QLabel("DRAG MEDIA HERE OR DOUBLE CLICK IN PROJECT PANEL")
-        self.placeholder_label.setAlignment(Qt.AlignCenter)
-        self.placeholder_label.setStyleSheet("color: #444444; font-weight: bold; font-size: 12px;")
-        self.viewport_layout.addWidget(self.placeholder_label)
-
+        # Video Viewport Frame Canvas
+        self.viewport = VideoViewportWidget(placeholder_text="DRAG MEDIA HERE OR DOUBLE CLICK IN PROJECT PANEL")
         layout.addWidget(self.viewport, stretch=1)
 
         # Playhead Seek Slider
@@ -150,6 +144,9 @@ class SourceMonitorWidget(QWidget):
                     detected_frames = c_frames
                 logger.info(f"[SOURCE MONITOR] Loaded video stream: {detected_frames} frames @ {detected_fps:.2f} FPS")
 
+            self.player.setSource(QUrl.fromLocalFile(file_path))
+            self.player.setPosition(0)
+
         self.fps = detected_fps
         self.total_frames = detected_frames
         self.clip_data = {
@@ -162,44 +159,13 @@ class SourceMonitorWidget(QWidget):
         self.mark_in = 0
         self.mark_out = self.total_frames
 
-        self.play_timer.setInterval(max(10, int(1000 / self.fps)))
+        self.play_timer.setInterval(max(5, int(1000 / self.fps)))
         self.title_label.setText(f"SOURCE: {self.clip_data['name']} ({frames_to_timecode(self.total_frames, self.fps)})")
 
         self.seek_slider.setRange(0, self.total_frames)
         self.seek_slider.setValue(0)
-        self.render_frame(0)
+        self.seek_to_frame(0)
         self.update_timecode_display()
-
-    def render_frame(self, frame_num: int):
-        """Extract and display frame at specified index."""
-        if not self.cap or not self.cap.isOpened():
-            return
-
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
-        ret, frame = self.cap.read()
-        if ret and frame is not None:
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            h, w, ch = rgb_frame.shape
-            qimg = QImage(rgb_frame.data, w, h, w * ch, QImage.Format_RGB888)
-            pixmap = QPixmap.fromImage(qimg)
-            self.current_pixmap = pixmap
-
-            self.placeholder_label.hide()
-            self.video_display.show()
-            self._update_display_pixmap()
-
-    def _update_display_pixmap(self):
-        if self.current_pixmap and not self.current_pixmap.isNull():
-            vp_size = self.viewport.size()
-            if vp_size.width() > 10 and vp_size.height() > 10:
-                scaled = self.current_pixmap.scaled(
-                    vp_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
-                )
-                self.video_display.setPixmap(scaled)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._update_display_pixmap()
 
     def set_mark_in(self):
         self.mark_in = self.current_frame
@@ -217,9 +183,15 @@ class SourceMonitorWidget(QWidget):
         self.is_playing = not self.is_playing
         if self.is_playing:
             self.btn_play.setText("⏸")
+            if self.cap and self.cap.isOpened():
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
+            pos_ms = int((self.current_frame / self.fps) * 1000)
+            self.player.setPosition(pos_ms)
+            self.player.play()
             self.play_timer.start()
         else:
             self.btn_play.setText("▶")
+            self.player.pause()
             self.play_timer.stop()
 
     def step_back(self):
@@ -229,23 +201,54 @@ class SourceMonitorWidget(QWidget):
         self.seek_to_frame(min(self.total_frames, self.current_frame + 1))
 
     def seek_to_frame(self, frame: int):
+        """Perform exact position seek for user scrubbing / step buttons."""
         self.current_frame = frame
+        if self.cap and self.cap.isOpened():
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame)
+            ret, mat_frame = self.cap.read()
+            if ret and mat_frame is not None:
+                rgb_frame = cv2.cvtColor(mat_frame, cv2.COLOR_BGR2RGB)
+                h, w, ch = rgb_frame.shape
+                qimg = QImage(rgb_frame.data, w, h, w * ch, QImage.Format_RGB888)
+                pixmap = QPixmap.fromImage(qimg)
+                self.viewport.set_pixmap(pixmap)
+
+        pos_ms = int((frame / self.fps) * 1000)
+        self.player.setPosition(pos_ms)
+
         self.seek_slider.blockSignals(True)
         self.seek_slider.setValue(frame)
         self.seek_slider.blockSignals(False)
-        self.render_frame(frame)
         self.update_timecode_display()
 
     def _on_slider_moved(self, value: int):
-        self.current_frame = value
-        self.render_frame(value)
-        self.update_timecode_display()
+        if not self.is_playing:
+            self.seek_to_frame(value)
 
     def _on_timer_tick(self):
+        """Ultra-fast sequential frame playback with synced audio output."""
+        if not self.cap or not self.cap.isOpened():
+            return
+
         if self.current_frame >= self.total_frames or self.current_frame >= self.mark_out:
             self.seek_to_frame(self.mark_in)
+            return
+
+        ret, mat_frame = self.cap.read()
+        if ret and mat_frame is not None:
+            rgb_frame = cv2.cvtColor(mat_frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = rgb_frame.shape
+            qimg = QImage(rgb_frame.data, w, h, w * ch, QImage.Format_RGB888)
+            pixmap = QPixmap.fromImage(qimg)
+            self.viewport.set_pixmap(pixmap)
+
+            self.current_frame += 1
+            self.seek_slider.blockSignals(True)
+            self.seek_slider.setValue(self.current_frame)
+            self.seek_slider.blockSignals(False)
+            self.update_timecode_display()
         else:
-            self.seek_to_frame(self.current_frame + 1)
+            self.seek_to_frame(self.mark_in)
 
     def update_timecode_display(self):
         tc = frames_to_timecode(self.current_frame, self.fps)
@@ -271,5 +274,9 @@ class SourceMonitorWidget(QWidget):
         if self.cap:
             self.cap.release()
             self.cap = None
+        self.player.stop()
         super().closeEvent(event)
+
+
+
 
