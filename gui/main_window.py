@@ -1,7 +1,7 @@
 """
 Primary Dockable MainWindow for Hedit Pro.
 Arranges panels in Premiere Pro workspace layout using QDockWidgets and QTabWidget.
-Connects signals across Media Pool, Source Monitor, Program Monitor, VU Meter, and Timeline.
+Connects signals across Media Pool, Source Monitor, Program Monitor, VU Meter, Effect Controls, and Timeline.
 """
 
 from PySide6.QtWidgets import (
@@ -147,7 +147,7 @@ class MainWindow(QMainWindow):
         self.source_monitor.insert_to_timeline.connect(self._on_insert_clip_to_timeline)
         self.source_monitor.overwrite_to_timeline.connect(self._on_overwrite_clip_to_timeline)
 
-        # Sync Playhead between Program Monitor & Timeline Canvas
+        # Sync Playhead between Program Monitor & Timeline Canvas & Effect Controls
         self.program_monitor.position_changed.connect(self._on_program_monitor_seek)
         self.timeline_widget.playhead_moved.connect(self.program_monitor.seek_to_frame)
 
@@ -206,6 +206,7 @@ class MainWindow(QMainWindow):
     def _on_program_monitor_seek(self, frame: int):
         self.timeline_widget.model.playhead_frame = frame
         self.timeline_widget.refresh_timeline()
+        self.effect_controls.set_frame(frame)
 
     def on_import_media_action(self):
         self.media_pool.on_import_click()
