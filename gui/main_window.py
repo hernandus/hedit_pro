@@ -1,12 +1,12 @@
 """
 Primary Dockable MainWindow for Hedit Pro.
 Arranges panels in Premiere Pro workspace layout using QDockWidgets and QTabWidget.
-Connects signals across Media Pool, Source Monitor, Program Monitor, and Timeline.
+Connects signals across Media Pool, Source Monitor, Program Monitor, VU Meter, and Timeline.
 """
 
 from PySide6.QtWidgets import (
     QMainWindow, QDockWidget, QTabWidget, QStatusBar, QMenuBar,
-    QMenu, QLabel, QWidget
+    QMenu, QLabel, QWidget, QHBoxLayout
 )
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon, QKeySequence, QAction, QShortcut
@@ -14,6 +14,7 @@ from PySide6.QtGui import QIcon, QKeySequence, QAction, QShortcut
 from core.engine import MLTEngine
 from gui.widgets.monitors.source import SourceMonitorWidget
 from gui.widgets.monitors.program import ProgramMonitorWidget
+from gui.widgets.monitors.vu_meter import StereoVUMeterWidget
 from gui.widgets.timeline.canvas import TimelineCanvasWidget
 from gui.widgets.media_pool.browser import MediaPoolWidget
 from gui.widgets.inspector.transform import EffectControlsWidget
@@ -104,12 +105,23 @@ class MainWindow(QMainWindow):
         self.top_left_tabs.addTab(self.effect_controls, "Effect Controls")
         self.dock_top_left.setWidget(self.top_left_tabs)
 
-        # 3. Program Monitor & Lumetri Color Tabbed Dock (Top Right)
+        # 3. Program Monitor & Lumetri Color Tabbed Dock with VU Meter (Top Right)
         self.dock_top_right = QDockWidget("Program & Color", self)
         self.top_right_tabs = QTabWidget()
+        
+        # Program Monitor Container with Stereo VU Meter on right
+        prog_container = QWidget()
+        prog_layout = QHBoxLayout(prog_container)
+        prog_layout.setContentsMargins(0, 0, 0, 0)
+        prog_layout.setSpacing(2)
+
         self.program_monitor = ProgramMonitorWidget()
+        self.vu_meter = StereoVUMeterWidget()
+        prog_layout.addWidget(self.program_monitor, stretch=1)
+        prog_layout.addWidget(self.vu_meter)
+
         self.color_widget = LumetriColorWidget()
-        self.top_right_tabs.addTab(self.program_monitor, "Program Monitor")
+        self.top_right_tabs.addTab(prog_container, "Program Monitor")
         self.top_right_tabs.addTab(self.color_widget, "Lumetri Color")
         self.dock_top_right.setWidget(self.top_right_tabs)
 
@@ -142,12 +154,12 @@ class MainWindow(QMainWindow):
     def setup_shortcuts(self):
         # Spacebar: Play/Pause Program Monitor
         self.shortcut_space = QShortcut(QKeySequence(Qt.Key_Space), self)
-        self.shortcut_space.activated.connect(self.program_monitor.shuttle_forward if not self.program_monitor.is_playing else self.program_monitor.shuttle_stop)
+        self.shortcut_space.activated.connect(self._toggle_program_play)
 
         # J-K-L Shuttle Navigation
-        QShortcut(QKeySequence("j"), self).activated.connect(self.program_monitor.shuttle_reverse)
-        QShortcut(QKeySequence("k"), self).activated.connect(self.program_monitor.shuttle_stop)
-        QShortcut(QKeySequence("l"), self).activated.connect(self.program_monitor.shuttle_forward)
+        QShortcut(QKeySequence("j"), self).activated.connect(self._shuttle_j)
+        QShortcut(QKeySequence("k"), self).activated.connect(self._shuttle_k)
+        QShortcut(QKeySequence("l"), self).activated.connect(self._shuttle_l)
 
         # Tools Shortcuts: V, C, B
         QShortcut(QKeySequence("v"), self).activated.connect(lambda: self.timeline_widget.set_active_tool("V"))
@@ -157,6 +169,26 @@ class MainWindow(QMainWindow):
         # In (I) & Out (O) Marks for Source Monitor
         QShortcut(QKeySequence("i"), self).activated.connect(self.source_monitor.set_mark_in)
         QShortcut(QKeySequence("o"), self).activated.connect(self.source_monitor.set_mark_out)
+
+    def _toggle_program_play(self):
+        if not self.program_monitor.is_playing:
+            self.program_monitor.shuttle_forward()
+            self.vu_meter.start_meter()
+        else:
+            self.program_monitor.shuttle_stop()
+            self.vu_meter.stop_meter()
+
+    def _shuttle_j(self):
+        self.program_monitor.shuttle_reverse()
+        self.vu_meter.start_meter()
+
+    def _shuttle_k(self):
+        self.program_monitor.shuttle_stop()
+        self.vu_meter.stop_meter()
+
+    def _shuttle_l(self):
+        self.program_monitor.shuttle_forward()
+        self.vu_meter.start_meter()
 
     def _on_media_double_clicked(self, file_path: str):
         self.source_monitor.load_clip(file_path)

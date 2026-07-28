@@ -1,6 +1,6 @@
 """
 Multi-Track Timeline Canvas Widget for Hedit Pro.
-High-performance QGraphicsView timeline renderer supporting NLE tools (V, C, B, Y, U), magnetic snapping, and track headers.
+High-performance QGraphicsView timeline renderer supporting NLE tools (V, C, B, Y, U), magnetic snapping, audio waveforms, and track headers.
 """
 
 from PySide6.QtWidgets import (
@@ -9,15 +9,16 @@ from PySide6.QtWidgets import (
     QGraphicsTextItem, QFrame, QSplitter
 )
 from PySide6.QtCore import Qt, Signal, QRectF, QPointF
-from PySide6.QtGui import QColor, QPen, QBrush, QFont, QCursor
+from PySide6.QtGui import QColor, QPen, QBrush, QFont, QPolygonF, QPainterPath
 
 from core.timeline_model import SequenceModel, ClipItem
+from core.cache import CacheManager
 from gui.widgets.timeline.track_header import TrackHeaderWidget
 from gui.utils.timecode import frames_to_timecode
 
 
 class ClipGraphicsItem(QGraphicsRectItem):
-    """Visual graphics item representing a single clip on the timeline."""
+    """Visual graphics item representing a single clip on the timeline with waveform rendering."""
 
     def __init__(self, clip: ClipItem, pixels_per_frame: float = 2.0, parent=None):
         self.clip = clip
@@ -50,8 +51,6 @@ class ClipGraphicsItem(QGraphicsRectItem):
 
     def update_position(self):
         x = self.clip.start_frame * self.pixels_per_frame
-        # Calculate Y according to track_index
-        # Video tracks V3(0), V2(1), V1(2), then Audio A1(0), A2(1), A3(2)
         if not self.clip.is_audio:
             y = (self.clip.track_index * 48) + 2
         else:
@@ -61,6 +60,28 @@ class ClipGraphicsItem(QGraphicsRectItem):
 
     def paint(self, painter, option, widget=None):
         super().paint(painter, option, widget)
+
+        # Render Audio Peak Waveform if audio clip
+        if self.clip.is_audio:
+            cache_mgr = CacheManager()
+            peaks = cache_mgr.get_audio_peaks(self.clip.file_path)
+            
+            w = self.rect().width()
+            h = self.rect().height()
+            mid_y = h / 2.0
+
+            painter.setPen(QPen(QColor("#a5d6a7"), 1))
+            num_peaks = len(peaks)
+            if num_peaks > 0:
+                dx = w / float(num_peaks)
+                for i in range(num_peaks - 1):
+                    x1 = i * dx
+                    x2 = (i + 1) * dx
+                    amp1 = peaks[i] * (h / 2.5)
+                    amp2 = peaks[i + 1] * (h / 2.5)
+                    painter.drawLine(x1, mid_y - amp1, x2, mid_y - amp2)
+                    painter.drawLine(x1, mid_y + amp1, x2, mid_y + amp2)
+
         if self.isSelected():
             painter.setPen(QPen(QColor("#00ffcc"), 2))
             painter.drawRect(self.rect())
@@ -263,14 +284,12 @@ class TimelineCanvasWidget(QWidget):
             click_frame = self.model.snap_frame(click_frame)
 
         if self.active_tool == "C":
-            # Razor Tool: Split clip under click
             track_idx = int(scene_pos.y() // 48)
             is_audio = track_idx >= 3
             real_track_idx = track_idx if not is_audio else (track_idx - 3)
             self.model.razor_clip_at(real_track_idx, click_frame, is_audio=is_audio)
             self.refresh_timeline()
         else:
-            # Default Move Playhead
             self.model.playhead_frame = max(0, click_frame)
             self.playhead_moved.emit(self.model.playhead_frame)
             self.refresh_timeline()
