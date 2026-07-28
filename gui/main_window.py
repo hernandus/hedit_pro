@@ -144,20 +144,25 @@ class MainWindow(QMainWindow):
         self.timeline_widget = TimelineCanvasWidget()
         self.dock_timeline.setWidget(self.timeline_widget)
 
-        # Arrange Docks in Premiere Layout
-        self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_source)
+        # Arrange Docks per User Layout (Top Row: Media Pool | Source Monitor | Program Monitor, Bottom Row: Timeline)
+        self.setCorner(Qt.BottomLeftCorner, Qt.BottomDockWidgetArea)
+        self.setCorner(Qt.BottomRightCorner, Qt.BottomDockWidgetArea)
+
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_media)
+        self.splitDockWidget(self.dock_media, self.dock_source, Qt.Horizontal)
+        self.splitDockWidget(self.dock_source, self.dock_program, Qt.Horizontal)
+
         self.tabifyDockWidget(self.dock_source, self.dock_effect_controls)
         self.dock_source.raise_()
 
-        self.addDockWidget(Qt.RightDockWidgetArea, self.dock_program)
         self.tabifyDockWidget(self.dock_program, self.dock_lumetri)
         self.dock_program.raise_()
-        
-        self.splitDockWidget(self.dock_source, self.dock_media, Qt.Vertical)
-        self.splitDockWidget(self.dock_program, self.dock_timeline, Qt.Vertical)
+
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.dock_timeline)
 
         # Adjust initial relative sizes
-        self.resizeDocks([self.dock_source, self.dock_program], [450, 450], Qt.Vertical)
+        self.resizeDocks([self.dock_media, self.dock_source, self.dock_program], [240, 520, 520], Qt.Horizontal)
+        self.resizeDocks([self.dock_source, self.dock_timeline], [420, 260], Qt.Vertical)
 
     def connect_signals(self):
         # Pass sequence model to Program Monitor for timeline preview rendering
