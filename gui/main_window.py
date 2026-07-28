@@ -111,16 +111,17 @@ class MainWindow(QMainWindow):
         self.dock_media = QDockWidget(f"Project: {self.media_pool.project_name}", self)
         self.dock_media.setWidget(self.media_pool)
 
-        # 2. Source Monitor & Effect Controls Tabbed Dock (Top Left)
-        self.dock_top_left = QDockWidget("Source & Inspector", self)
-        self.top_left_tabs = QTabWidget()
+        # 2. Source Monitor Dock (Top Left)
         self.source_monitor = SourceMonitorWidget()
-        self.effect_controls = EffectControlsWidget()
-        self.top_left_tabs.addTab(self.source_monitor, "Source Monitor")
-        self.top_left_tabs.addTab(self.effect_controls, "Effect Controls")
-        self.dock_top_left.setWidget(self.top_left_tabs)
+        self.dock_source = QDockWidget("Source Monitor", self)
+        self.dock_source.setWidget(self.source_monitor)
 
-        # 3. Program Monitor & Lumetri Color Tabbed Dock with VU Meter (Top Right)
+        # 3. Effect Controls Dock (Decoupled Independent Window / Dock)
+        self.effect_controls = EffectControlsWidget()
+        self.dock_effect_controls = QDockWidget("Effect Controls", self)
+        self.dock_effect_controls.setWidget(self.effect_controls)
+
+        # 4. Program Monitor & Lumetri Color Tabbed Dock with VU Meter (Top Right)
         self.dock_top_right = QDockWidget("Program & Color", self)
         self.top_right_tabs = QTabWidget()
         
@@ -140,20 +141,23 @@ class MainWindow(QMainWindow):
         self.top_right_tabs.addTab(self.color_widget, "Lumetri Color")
         self.dock_top_right.setWidget(self.top_right_tabs)
 
-        # 4. Timeline Dock (Bottom Right)
+        # 5. Timeline Dock (Bottom Right)
         self.dock_timeline = QDockWidget("Timeline: Main Sequence", self)
         self.timeline_widget = TimelineCanvasWidget()
         self.dock_timeline.setWidget(self.timeline_widget)
 
         # Arrange Docks in Premiere Layout
-        self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_top_left)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_source)
+        self.tabifyDockWidget(self.dock_source, self.dock_effect_controls)
+        self.dock_source.raise_()
+
         self.addDockWidget(Qt.RightDockWidgetArea, self.dock_top_right)
         
-        self.splitDockWidget(self.dock_top_left, self.dock_media, Qt.Vertical)
+        self.splitDockWidget(self.dock_source, self.dock_media, Qt.Vertical)
         self.splitDockWidget(self.dock_top_right, self.dock_timeline, Qt.Vertical)
 
         # Adjust initial relative sizes
-        self.resizeDocks([self.dock_top_left, self.dock_top_right], [450, 450], Qt.Vertical)
+        self.resizeDocks([self.dock_source, self.dock_top_right], [450, 450], Qt.Vertical)
 
     def connect_signals(self):
         # Pass sequence model to Program Monitor for timeline preview rendering
@@ -221,7 +225,7 @@ class MainWindow(QMainWindow):
     def _on_media_double_clicked(self, file_path: str):
         logger.info(f"[MEDIA] Loading media '{file_path}' into Source Monitor.")
         self.source_monitor.load_clip(file_path)
-        self.top_left_tabs.setCurrentWidget(self.source_monitor)
+        self.dock_source.raise_()
         self.lbl_status.setText(f"Loaded clip into Source Monitor: {file_path}")
 
     def _on_insert_clip_to_timeline(self, clip_data: dict):

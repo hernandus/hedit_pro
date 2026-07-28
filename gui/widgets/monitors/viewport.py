@@ -6,7 +6,7 @@ preventing Qt layout resize feedback loops.
 
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPainter, QPixmap
+from PySide6.QtGui import QPainter, QPixmap, QColor, QFont
 
 
 class VideoViewportWidget(QFrame):
@@ -15,6 +15,7 @@ class VideoViewportWidget(QFrame):
     def __init__(self, placeholder_text: str = "DRAG MEDIA HERE", parent=None):
         super().__init__(parent)
         self.current_pixmap = None
+        self.show_proxy_badge = False
         self.setStyleSheet("background-color: #000000; border: 1px solid #282828;")
 
         layout = QVBoxLayout(self)
@@ -54,3 +55,16 @@ class VideoViewportWidget(QFrame):
                 x = (w - scaled.width()) // 2
                 y = (h - scaled.height()) // 2
                 painter.drawPixmap(x, y, scaled)
+
+                # Draw 'PROXIES ON' badge in top-right corner of video frame
+                if self.show_proxy_badge:
+                    painter.setPen(QColor("#00A8FF"))
+                    font = QFont("Inter", 9, QFont.Bold)
+                    painter.setFont(font)
+                    badge_text = "PROXIES ON"
+                    fm = painter.fontMetrics()
+                    bw = fm.horizontalAdvance(badge_text)
+                    badge_x = x + scaled.width() - bw - 10
+                    badge_y = y + fm.ascent() + 8
+                    if badge_x > x:
+                        painter.drawText(badge_x, badge_y, badge_text)
