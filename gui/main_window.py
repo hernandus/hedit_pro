@@ -121,11 +121,8 @@ class MainWindow(QMainWindow):
         self.dock_effect_controls = QDockWidget("Effect Controls", self)
         self.dock_effect_controls.setWidget(self.effect_controls)
 
-        # 4. Program Monitor & Lumetri Color Tabbed Dock with VU Meter (Top Right)
-        self.dock_top_right = QDockWidget("Program & Color", self)
-        self.top_right_tabs = QTabWidget()
-        
-        # Program Monitor Container with Stereo VU Meter on right
+        # 4. Program Monitor Dock (Top Right)
+        self.dock_program = QDockWidget("Program Monitor", self)
         prog_container = QWidget()
         prog_layout = QHBoxLayout(prog_container)
         prog_layout.setContentsMargins(0, 0, 0, 0)
@@ -135,13 +132,14 @@ class MainWindow(QMainWindow):
         self.vu_meter = StereoVUMeterWidget()
         prog_layout.addWidget(self.program_monitor, stretch=1)
         prog_layout.addWidget(self.vu_meter)
+        self.dock_program.setWidget(prog_container)
 
+        # 5. Lumetri Color Dock (Decoupled Independent Window / Dock)
         self.color_widget = LumetriColorWidget()
-        self.top_right_tabs.addTab(prog_container, "Program Monitor")
-        self.top_right_tabs.addTab(self.color_widget, "Lumetri Color")
-        self.dock_top_right.setWidget(self.top_right_tabs)
+        self.dock_lumetri = QDockWidget("Lumetri Color", self)
+        self.dock_lumetri.setWidget(self.color_widget)
 
-        # 5. Timeline Dock (Bottom Right)
+        # 6. Timeline Dock (Bottom Right)
         self.dock_timeline = QDockWidget("Timeline: Main Sequence", self)
         self.timeline_widget = TimelineCanvasWidget()
         self.dock_timeline.setWidget(self.timeline_widget)
@@ -151,13 +149,15 @@ class MainWindow(QMainWindow):
         self.tabifyDockWidget(self.dock_source, self.dock_effect_controls)
         self.dock_source.raise_()
 
-        self.addDockWidget(Qt.RightDockWidgetArea, self.dock_top_right)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.dock_program)
+        self.tabifyDockWidget(self.dock_program, self.dock_lumetri)
+        self.dock_program.raise_()
         
         self.splitDockWidget(self.dock_source, self.dock_media, Qt.Vertical)
-        self.splitDockWidget(self.dock_top_right, self.dock_timeline, Qt.Vertical)
+        self.splitDockWidget(self.dock_program, self.dock_timeline, Qt.Vertical)
 
         # Adjust initial relative sizes
-        self.resizeDocks([self.dock_source, self.dock_top_right], [450, 450], Qt.Vertical)
+        self.resizeDocks([self.dock_source, self.dock_program], [450, 450], Qt.Vertical)
 
     def connect_signals(self):
         # Pass sequence model to Program Monitor for timeline preview rendering
