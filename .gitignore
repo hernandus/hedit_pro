@@ -35,7 +35,7 @@ venv.bak/
 *.swp
 *.swo
 
-# Media & Cache & Test Projects
+# Media & Cache & Logs
 *.mp4
 *.MP4
 *.mkv
@@ -45,4 +45,5 @@ venv.bak/
 .cache/
 thumbs/
 peaks/
+logs/
 test_project/

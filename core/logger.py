@@ -1,6 +1,6 @@
 """
 Centralized Logging Subsystem for Hedit Pro.
-Logs application lifecycle, engine state, media operations, timeline events, and export rendering to console and log files.
+Logs application lifecycle, engine state, media operations, timeline events, and export rendering to console and log files inside /logs.
 """
 
 import os
@@ -9,8 +9,9 @@ import logging
 import platform
 from datetime import datetime
 
-
-LOG_DIR = os.path.expanduser("~/.cache/hedit_pro/logs")
+# Project root directory and logs folder
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 
 SESSION_LOG_FILE = os.path.join(LOG_DIR, f"hedit_pro_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
@@ -43,12 +44,12 @@ class HeditLogger:
             datefmt="%Y-%m-%d %H:%M:%S"
         )
 
-        # File Handler (Session log)
+        # File Handler (Session log inside project /logs)
         file_handler = logging.FileHandler(SESSION_LOG_FILE, mode="a", encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(formatter)
 
-        # File Handler (Latest log)
+        # File Handler (Latest log inside project /logs)
         latest_handler = logging.FileHandler(LATEST_LOG_FILE, mode="w", encoding="utf-8")
         latest_handler.setLevel(logging.DEBUG)
         latest_handler.setFormatter(formatter)
@@ -68,7 +69,7 @@ class HeditLogger:
         cls._logger.info(f" Time: {datetime.now().isoformat()}")
         cls._logger.info(f" System OS: {platform.system()} {platform.release()} ({platform.machine()})")
         cls._logger.info(f" Python Executable: {sys.executable} ({platform.python_version()})")
-        cls._logger.info(f" Log File: {SESSION_LOG_FILE}")
+        cls._logger.info(f" Project Log File: {SESSION_LOG_FILE}")
         cls._logger.info("==================================================")
 
     @classmethod

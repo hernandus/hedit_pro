@@ -156,6 +156,9 @@ class MainWindow(QMainWindow):
         self.resizeDocks([self.dock_top_left, self.dock_top_right], [450, 450], Qt.Vertical)
 
     def connect_signals(self):
+        # Pass sequence model to Program Monitor for timeline preview rendering
+        self.program_monitor.set_sequence_model(self.timeline_widget.model)
+
         # Double click media in Project Panel -> Load into Source Monitor
         self.media_pool.media_double_clicked.connect(self._on_media_double_clicked)
         # Insert / Overwrite from Source Monitor -> Add to Timeline Sequence
@@ -165,6 +168,7 @@ class MainWindow(QMainWindow):
         # Sync Playhead between Program Monitor & Timeline Canvas & Effect Controls
         self.program_monitor.position_changed.connect(self._on_program_monitor_seek)
         self.timeline_widget.playhead_moved.connect(self.program_monitor.seek_to_frame)
+
 
     def setup_shortcuts(self):
         # Spacebar: Play/Pause Program Monitor

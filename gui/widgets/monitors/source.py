@@ -4,14 +4,18 @@ Supports clip preview, seek slider, In/Out range marking, timecode display, and 
 """
 
 import os
+import cv2
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QSlider, QStyle
 )
 from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QFont, QColor, QImage, QPixmap
 
 from gui.utils.timecode import frames_to_timecode
+from core.logger import get_logger
+
+logger = get_logger()
 
 
 class SourceMonitorWidget(QWidget):
@@ -29,6 +33,9 @@ class SourceMonitorWidget(QWidget):
         self.mark_out = self.total_frames
         self.is_playing = False
         self.clip_data = None
+
+        self.cap = None
+        self.current_pixmap = None
 
         # Playback timer
         self.play_timer = QTimer(self)
@@ -51,7 +58,13 @@ class SourceMonitorWidget(QWidget):
         self.viewport = QFrame()
         self.viewport.setStyleSheet("background-color: #000000; border: 1px solid #282828;")
         self.viewport_layout = QVBoxLayout(self.viewport)
+        self.viewport_layout.setContentsMargins(0, 0, 0, 0)
         
+        self.video_display = QLabel()
+        self.video_display.setAlignment(Qt.AlignCenter)
+        self.video_display.setStyleSheet("background-color: #000000;")
+        self.viewport_layout.addWidget(self.video_display)
+
         self.placeholder_label = QLabel("DRAG MEDIA HERE OR DOUBLE CLICK IN PROJECT PANEL")
         self.placeholder_label.setAlignment(Qt.AlignCenter)
         self.placeholder_label.setStyleSheet("color: #444444; font-weight: bold; font-size: 12px;")
@@ -119,25 +132,74 @@ class SourceMonitorWidget(QWidget):
 
     def load_clip(self, file_path: str, duration_frames: int = 600, fps: float = 60.0):
         """Load a media clip into the Source Monitor."""
+        if self.cap:
+            self.cap.release()
+            self.cap = None
+
+        detected_fps = fps
+        detected_frames = duration_frames
+
+        if os.path.exists(file_path):
+            self.cap = cv2.VideoCapture(file_path)
+            if self.cap.isOpened():
+                c_fps = self.cap.get(cv2.CAP_PROP_FPS)
+                if c_fps and c_fps > 0:
+                    detected_fps = float(c_fps)
+                c_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                if c_frames and c_frames > 0:
+                    detected_frames = c_frames
+                logger.info(f"[SOURCE MONITOR] Loaded video stream: {detected_frames} frames @ {detected_fps:.2f} FPS")
+
+        self.fps = detected_fps
+        self.total_frames = detected_frames
         self.clip_data = {
             "path": file_path,
             "name": os.path.basename(file_path),
-            "duration": duration_frames,
-            "fps": fps
+            "duration": self.total_frames,
+            "fps": self.fps
         }
-        self.fps = fps
-        self.total_frames = duration_frames
         self.current_frame = 0
         self.mark_in = 0
         self.mark_out = self.total_frames
 
+        self.play_timer.setInterval(max(10, int(1000 / self.fps)))
         self.title_label.setText(f"SOURCE: {self.clip_data['name']} ({frames_to_timecode(self.total_frames, self.fps)})")
-        self.placeholder_label.setText(f"MEDIA PREVIEW: {self.clip_data['name']}")
-        self.placeholder_label.setStyleSheet("color: #2680eb; font-weight: bold; font-size: 13px;")
 
         self.seek_slider.setRange(0, self.total_frames)
         self.seek_slider.setValue(0)
+        self.render_frame(0)
         self.update_timecode_display()
+
+    def render_frame(self, frame_num: int):
+        """Extract and display frame at specified index."""
+        if not self.cap or not self.cap.isOpened():
+            return
+
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+        ret, frame = self.cap.read()
+        if ret and frame is not None:
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = rgb_frame.shape
+            qimg = QImage(rgb_frame.data, w, h, w * ch, QImage.Format_RGB888)
+            pixmap = QPixmap.fromImage(qimg)
+            self.current_pixmap = pixmap
+
+            self.placeholder_label.hide()
+            self.video_display.show()
+            self._update_display_pixmap()
+
+    def _update_display_pixmap(self):
+        if self.current_pixmap and not self.current_pixmap.isNull():
+            vp_size = self.viewport.size()
+            if vp_size.width() > 10 and vp_size.height() > 10:
+                scaled = self.current_pixmap.scaled(
+                    vp_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
+                self.video_display.setPixmap(scaled)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_display_pixmap()
 
     def set_mark_in(self):
         self.mark_in = self.current_frame
@@ -171,14 +233,16 @@ class SourceMonitorWidget(QWidget):
         self.seek_slider.blockSignals(True)
         self.seek_slider.setValue(frame)
         self.seek_slider.blockSignals(False)
+        self.render_frame(frame)
         self.update_timecode_display()
 
     def _on_slider_moved(self, value: int):
         self.current_frame = value
+        self.render_frame(value)
         self.update_timecode_display()
 
     def _on_timer_tick(self):
-        if self.current_frame >= self.total_frames:
+        if self.current_frame >= self.total_frames or self.current_frame >= self.mark_out:
             self.seek_to_frame(self.mark_in)
         else:
             self.seek_to_frame(self.current_frame + 1)
@@ -202,3 +266,10 @@ class SourceMonitorWidget(QWidget):
             payload["mark_in"] = self.mark_in
             payload["mark_out"] = self.mark_out
             self.overwrite_to_timeline.emit(payload)
+
+    def closeEvent(self, event):
+        if self.cap:
+            self.cap.release()
+            self.cap = None
+        super().closeEvent(event)
+

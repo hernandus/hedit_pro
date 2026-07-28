@@ -3,12 +3,14 @@ Program Monitor Widget for Hedit Pro.
 Active sequence preview, resolution scaling, shuttle playback, and timecode synchronization.
 """
 
+import os
+import cv2
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QSlider, QComboBox
 )
 from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QImage, QPixmap
 
 from gui.utils.timecode import frames_to_timecode
 
@@ -26,6 +28,10 @@ class ProgramMonitorWidget(QWidget):
         self.is_playing = False
         self.playback_speed = 1.0 # 1.0 = normal, 2.0 = 2x, -1.0 = reverse (J-K-L shuttle)
         self.loop_enabled = False
+
+        self.sequence_model = None
+        self.caps = {}
+        self.current_pixmap = None
 
         # Playback timer
         self.play_timer = QTimer(self)
@@ -48,6 +54,12 @@ class ProgramMonitorWidget(QWidget):
         self.viewport = QFrame()
         self.viewport.setStyleSheet("background-color: #000000; border: 1px solid #282828;")
         self.viewport_layout = QVBoxLayout(self.viewport)
+        self.viewport_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.video_display = QLabel()
+        self.video_display.setAlignment(Qt.AlignCenter)
+        self.video_display.setStyleSheet("background-color: #000000;")
+        self.viewport_layout.addWidget(self.video_display)
 
         self.placeholder_label = QLabel("PROGRAM MONITOR (SEQUENCE OUTPUT)")
         self.placeholder_label.setAlignment(Qt.AlignCenter)
@@ -110,6 +122,9 @@ class ProgramMonitorWidget(QWidget):
         controls_layout.addStretch()
         layout.addLayout(controls_layout)
 
+    def set_sequence_model(self, sequence_model):
+        self.sequence_model = sequence_model
+
     def shuttle_reverse(self):
         """J key: reverse playback or increase reverse speed."""
         if self.playback_speed > 0:
@@ -144,17 +159,75 @@ class ProgramMonitorWidget(QWidget):
     def toggle_loop(self, checked: bool):
         self.loop_enabled = checked
 
+    def render_sequence_frame(self, frame_num: int):
+        """Render active timeline sequence video frame at specified sequence frame index."""
+        if not self.sequence_model:
+            return
+
+        active_clip = None
+        # Check video tracks from top (V3, V2, V1)
+        for track in self.sequence_model.video_tracks:
+            clip = track.get_clip_at(frame_num)
+            if clip:
+                active_clip = clip
+                break
+
+        if active_clip and os.path.exists(active_clip.file_path):
+            file_path = active_clip.file_path
+            if file_path not in self.caps:
+                cap = cv2.VideoCapture(file_path)
+                if cap.isOpened():
+                    self.caps[file_path] = cap
+            
+            cap = self.caps.get(file_path)
+            if cap and cap.isOpened():
+                clip_frame = (frame_num - active_clip.start_frame) + active_clip.mark_in
+                cap.set(cv2.CAP_PROP_POS_FRAMES, clip_frame)
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    h, w, ch = rgb_frame.shape
+                    qimg = QImage(rgb_frame.data, w, h, w * ch, QImage.Format_RGB888)
+                    pixmap = QPixmap.fromImage(qimg)
+                    self.current_pixmap = pixmap
+
+                    self.placeholder_label.hide()
+                    self.video_display.show()
+                    self._update_display_pixmap()
+                    return
+
+        # Gap or no clip
+        self.current_pixmap = None
+        self.video_display.clear()
+        self.placeholder_label.show()
+        self.placeholder_label.setText("PROGRAM MONITOR (EMPTY TIMELINE GAP)")
+
+    def _update_display_pixmap(self):
+        if self.current_pixmap and not self.current_pixmap.isNull():
+            vp_size = self.viewport.size()
+            if vp_size.width() > 10 and vp_size.height() > 10:
+                scaled = self.current_pixmap.scaled(
+                    vp_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
+                self.video_display.setPixmap(scaled)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_display_pixmap()
+
     def seek_to_frame(self, frame: int):
         self.current_frame = max(0, min(self.total_sequence_frames, frame))
         self.seek_slider.blockSignals(True)
         self.seek_slider.setValue(self.current_frame)
         self.seek_slider.blockSignals(False)
         self.tc_label.setText(frames_to_timecode(self.current_frame, self.fps))
+        self.render_sequence_frame(self.current_frame)
         self.position_changed.emit(self.current_frame)
 
     def _on_slider_moved(self, value: int):
         self.current_frame = value
         self.tc_label.setText(frames_to_timecode(self.current_frame, self.fps))
+        self.render_sequence_frame(self.current_frame)
         self.position_changed.emit(self.current_frame)
 
     def _on_timer_tick(self):
@@ -173,3 +246,11 @@ class ProgramMonitorWidget(QWidget):
                 self.shuttle_stop()
         else:
             self.seek_to_frame(next_frame)
+
+    def closeEvent(self, event):
+        for cap in self.caps.values():
+            if cap:
+                cap.release()
+        self.caps.clear()
+        super().closeEvent(event)
+
