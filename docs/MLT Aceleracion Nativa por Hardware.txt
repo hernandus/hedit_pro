@@ -1,0 +1,8 @@
+Nota de Dependencia para MLT Nativo en Linux
+Cuando lo desees, puedes ejecutar en tu terminal:
+
+bash:
+
+sudo apt update && sudo apt install -y python3-mlt melt libmlt-dev
+
+Con esto, el motor MLT activará automáticamente la aceleración nativa por hardware en Linux.

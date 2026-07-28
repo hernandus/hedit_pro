@@ -2,6 +2,7 @@
 Media Pool / Project Panel Widget (Premiere Pro style asset browser).
 """
 
+import os
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTreeView, QHeaderView, QFileDialog, QToolBar
@@ -14,6 +15,7 @@ class MediaPoolWidget(QWidget):
     """Project Panel for managing imported media files, bins, and assets."""
 
     media_imported = Signal(str)
+    media_double_clicked = Signal(str) # Emits file path when double clicked
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -41,12 +43,14 @@ class MediaPoolWidget(QWidget):
 
         # Tree View for Media Assets
         self.tree_view = QTreeView()
-        self.model = QStandardItemModel(0, 4)
-        self.model.setHorizontalHeaderLabels(["Name", "Type", "Duration", "FPS"])
+        self.model = QStandardItemModel(0, 5)
+        self.model.setHorizontalHeaderLabels(["Name", "Type", "Duration", "FPS", "Path"])
 
         self.tree_view.setModel(self.model)
         self.tree_view.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.tree_view.setColumnHidden(4, True) # Hide full path column
         self.tree_view.setAlternatingRowColors(True)
+        self.tree_view.doubleClicked.connect(self._on_item_double_clicked)
 
         layout.addWidget(self.tree_view)
 
@@ -59,7 +63,6 @@ class MediaPoolWidget(QWidget):
             self.media_imported.emit(path)
 
     def add_media_item(self, path: str):
-        import os
         name = os.path.basename(path)
         ext = os.path.splitext(name)[1].lower()
         
@@ -67,5 +70,12 @@ class MediaPoolWidget(QWidget):
         item_type = QStandardItem("Video" if ext in ['.mp4', '.mkv', '.mov', '.avi'] else "Audio/Image")
         item_dur = QStandardItem("00:00:10:00")
         item_fps = QStandardItem("60.00")
+        item_path = QStandardItem(path)
 
-        self.model.appendRow([item_name, item_type, item_dur, item_fps])
+        self.model.appendRow([item_name, item_type, item_dur, item_fps, item_path])
+
+    def _on_item_double_clicked(self, index):
+        row = index.row()
+        path_item = self.model.item(row, 4)
+        if path_item:
+            self.media_double_clicked.emit(path_item.text())
