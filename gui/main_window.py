@@ -135,6 +135,10 @@ class MainWindow(QMainWindow):
         self.source_monitor.insert_to_timeline.connect(self._on_insert_clip_to_timeline)
         self.source_monitor.overwrite_to_timeline.connect(self._on_overwrite_clip_to_timeline)
 
+        # Sync Playhead between Program Monitor & Timeline Canvas
+        self.program_monitor.position_changed.connect(self._on_program_monitor_seek)
+        self.timeline_widget.playhead_moved.connect(self.program_monitor.seek_to_frame)
+
     def setup_shortcuts(self):
         # Spacebar: Play/Pause Program Monitor
         self.shortcut_space = QShortcut(QKeySequence(Qt.Key_Space), self)
@@ -144,6 +148,11 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("j"), self).activated.connect(self.program_monitor.shuttle_reverse)
         QShortcut(QKeySequence("k"), self).activated.connect(self.program_monitor.shuttle_stop)
         QShortcut(QKeySequence("l"), self).activated.connect(self.program_monitor.shuttle_forward)
+
+        # Tools Shortcuts: V, C, B
+        QShortcut(QKeySequence("v"), self).activated.connect(lambda: self.timeline_widget.set_active_tool("V"))
+        QShortcut(QKeySequence("c"), self).activated.connect(lambda: self.timeline_widget.set_active_tool("C"))
+        QShortcut(QKeySequence("b"), self).activated.connect(lambda: self.timeline_widget.set_active_tool("B"))
 
         # In (I) & Out (O) Marks for Source Monitor
         QShortcut(QKeySequence("i"), self).activated.connect(self.source_monitor.set_mark_in)
@@ -155,10 +164,16 @@ class MainWindow(QMainWindow):
         self.lbl_status.setText(f"Loaded clip into Source Monitor: {file_path}")
 
     def _on_insert_clip_to_timeline(self, clip_data: dict):
-        self.lbl_status.setText(f"Inserted '{clip_data['name']}' into Timeline (In: {clip_data['mark_in']}, Out: {clip_data['mark_out']})")
+        self.timeline_widget.add_clip_to_timeline(clip_data, track_index=2) # Default V1
+        self.lbl_status.setText(f"Added '{clip_data['name']}' to Timeline (In: {clip_data['mark_in']}, Out: {clip_data['mark_out']})")
 
     def _on_overwrite_clip_to_timeline(self, clip_data: dict):
-        self.lbl_status.setText(f"Overwrote '{clip_data['name']}' into Timeline (In: {clip_data['mark_in']}, Out: {clip_data['mark_out']})")
+        self.timeline_widget.add_clip_to_timeline(clip_data, track_index=2) # Default V1
+        self.lbl_status.setText(f"Overwrote '{clip_data['name']}' on Timeline (In: {clip_data['mark_in']}, Out: {clip_data['mark_out']})")
+
+    def _on_program_monitor_seek(self, frame: int):
+        self.timeline_widget.model.playhead_frame = frame
+        self.timeline_widget.refresh_timeline()
 
     def on_import_media_action(self):
         self.media_pool.on_import_click()
