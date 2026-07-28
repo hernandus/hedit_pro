@@ -4,9 +4,9 @@ Handles initialisation, profile configuration (1080p 60fps / 4K), and MLT factor
 """
 
 import sys
-import logging
+from core.logger import get_logger
 
-logging.basicConfig(level=logging.INFO, format="[HeditPro Engine] %(levelname)s: %(message)s")
+logger = get_logger()
 
 HAS_MLT = False
 mlt = None
@@ -14,9 +14,9 @@ mlt = None
 try:
     import mlt
     HAS_MLT = True
-    logging.info("MLT Framework Python bindings successfully loaded.")
+    logger.info("[ENGINE] MLT Framework Python bindings successfully loaded.")
 except ImportError:
-    logging.warning("MLT Python module ('mlt') not found. Engine running in simulated/UI preview mode.")
+    logger.warning("[ENGINE] MLT Python module ('mlt') not found. Engine running in simulated/UI preview mode.")
 
 
 class MLTEngine:
@@ -43,24 +43,25 @@ class MLTEngine:
                 # Initialize MLT Factory
                 self.factory_active = mlt.Factory.init()
                 if self.factory_active:
-                    logging.info("MLT Factory initialized successfully.")
+                    logger.info("[ENGINE] MLT Factory initialized successfully.")
                     # Default Profile: 1080p 60fps
                     self.profile = mlt.Profile("atsc_1080p_60")
+                    logger.info("[ENGINE] Default MLT Profile set to 'atsc_1080p_60'.")
                 else:
-                    logging.error("Failed to initialize MLT Factory.")
+                    logger.error("[ENGINE] Failed to initialize MLT Factory.")
             except Exception as e:
-                logging.error(f"Error initializing MLT Engine: {e}")
+                logger.error(f"[ENGINE] Error initializing MLT Engine: {e}")
         else:
-            logging.info("MLT Engine initialized in Fallback Mode.")
+            logger.info("[ENGINE] MLT Engine initialized in Fallback Preview Mode.")
 
     def set_profile(self, profile_name: str = "atsc_1080p_60"):
         """Change current MLT Profile (e.g. 'atsc_1080p_60', 'atsc_1080p_2997', 'hdv_720_50p')."""
         if HAS_MLT and self.factory_active:
             try:
                 self.profile = mlt.Profile(profile_name)
-                logging.info(f"MLT Profile set to: {profile_name}")
+                logger.info(f"[ENGINE] MLT Profile updated to: {profile_name}")
             except Exception as e:
-                logging.error(f"Failed to set profile '{profile_name}': {e}")
+                logger.error(f"[ENGINE] Failed to set profile '{profile_name}': {e}")
 
     def is_available(self) -> bool:
         """Returns True if MLT framework is fully active and loaded."""
@@ -72,6 +73,6 @@ class MLTEngine:
             try:
                 mlt.Factory.close()
                 self.factory_active = False
-                logging.info("MLT Factory closed cleanly.")
+                logger.info("[ENGINE] MLT Factory closed cleanly.")
             except Exception as e:
-                logging.error(f"Error closing MLT Factory: {e}")
+                logger.error(f"[ENGINE] Error closing MLT Factory: {e}")

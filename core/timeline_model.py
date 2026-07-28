@@ -8,6 +8,9 @@ import os
 import uuid
 
 from core.engine import MLTEngine, HAS_MLT, mlt
+from core.logger import get_logger
+
+logger = get_logger()
 
 
 class ClipItem:
@@ -103,8 +106,9 @@ class SequenceModel:
                 profile = self.engine.profile or mlt.Profile("atsc_1080p_60")
                 self.tractor = mlt.Tractor(profile)
                 self.multitrack = self.tractor.multitrack()
+                logger.info("[TIMELINE] Initialized MLT Tractor & Multitrack pipeline.")
             except Exception as e:
-                print(f"[TimelineModel] Error initializing MLT Tractor: {e}")
+                logger.error(f"[TIMELINE] Error initializing MLT Tractor: {e}")
 
     def add_clip_to_track(
         self,
@@ -112,7 +116,7 @@ class SequenceModel:
         start_frame: int,
         mark_in: int,
         mark_out: int,
-        track_index: int = 2, # V1 track by default
+        track_index: int = 2,
         is_audio: bool = False
     ) -> ClipItem:
         clip_id = str(uuid.uuid4())[:8]
@@ -131,6 +135,7 @@ class SequenceModel:
         tracks = self.audio_tracks if is_audio else self.video_tracks
         if 0 <= track_index < len(tracks):
             tracks[track_index].add_clip(clip)
+            logger.info(f"[TIMELINE] Clip '{name}' (ID: {clip_id}) added to {tracks[track_index].name} at frame {start_frame} (In: {mark_in}, Out: {mark_out}).")
 
         return clip
 
@@ -145,14 +150,11 @@ class SequenceModel:
         if not clip or frame <= clip.start_frame or frame >= clip.end_frame:
             return False
 
-        # Split frame offset inside clip
         split_offset = frame - clip.start_frame
 
-        # Clip 1 right mark_out
         orig_out = clip.mark_out
         clip.mark_out = clip.mark_in + split_offset
 
-        # Clip 2 left mark_in & start_frame
         clip2_id = str(uuid.uuid4())[:8]
         clip2 = ClipItem(
             clip_id=clip2_id,
@@ -165,10 +167,10 @@ class SequenceModel:
             is_audio=is_audio
         )
         track.add_clip(clip2)
+        logger.info(f"[TIMELINE] Razor cut performed on clip '{clip.name}' at frame {frame} on track {track.name}.")
         return True
 
     def get_snap_points(self, tolerance_frames: int = 5) -> List[int]:
-        """Returns all magnetic snap frames (clip start/end edges, 0, playhead)."""
         snaps = {0, self.playhead_frame}
         for track in self.video_tracks + self.audio_tracks:
             for c in track.clips:
@@ -177,7 +179,6 @@ class SequenceModel:
         return sorted(list(snaps))
 
     def snap_frame(self, target_frame: int, tolerance_frames: int = 5) -> int:
-        """Find closest snap point within tolerance."""
         points = self.get_snap_points(tolerance_frames)
         best_point = target_frame
         min_diff = tolerance_frames + 1

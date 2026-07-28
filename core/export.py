@@ -9,6 +9,10 @@ import time
 from typing import Dict, Optional
 from PySide6.QtCore import QThread, Signal
 
+from core.logger import get_logger
+
+logger = get_logger()
+
 
 EXPORT_PRESETS: Dict[str, Dict[str, str]] = {
     "H.264 MP4 (1080p 60fps)": {
@@ -65,27 +69,17 @@ class ExportWorkerThread(QThread):
 
     def run(self):
         preset = EXPORT_PRESETS.get(self.preset_name, EXPORT_PRESETS["H.264 MP4 (1080p 60fps)"])
+        logger.info(f"[EXPORT] Starting export job to '{self.output_path}' using preset '{self.preset_name}'. Total frames: {self.total_frames}.")
+
         start_time = time.time()
 
-        # Build melt command or simulate background export steps
-        cmd = [
-            "melt",
-            "-consumer", f"avformat:{self.output_path}",
-            f"vcodec={preset['vcodec']}",
-            f"acodec={preset['acodec']}",
-            f"b={preset['vbitrate']}",
-            f"ab={preset['abitrate']}",
-            f"s={preset['res']}",
-            f"r={preset['fps']}"
-        ]
-
-        # Simulate frame rendering iterations with realistic ETA calculation
         for current_frame in range(1, self.total_frames + 1):
             if self.isInterruptionRequested():
+                logger.warning("[EXPORT] Export job cancelled by user.")
                 self.render_failed.emit("Export cancelled by user.")
                 return
 
-            time.sleep(0.005) # Simulated 200 FPS fast export rendering
+            time.sleep(0.005) # Simulated fast export rendering
             
             percent = int((current_frame / float(self.total_frames)) * 100)
             elapsed = time.time() - start_time
@@ -93,7 +87,9 @@ class ExportWorkerThread(QThread):
             remaining_frames = self.total_frames - current_frame
             eta_seconds = remaining_frames / max(1.0, fps_actual)
 
-            if current_frame % 10 == 0 or current_frame == self.total_frames:
+            if current_frame % 50 == 0 or current_frame == self.total_frames:
+                logger.debug(f"[EXPORT] Progress: {percent}% ({current_frame}/{self.total_frames} frames) - ETA: {int(eta_seconds)}s.")
                 self.progress_changed.emit(percent, eta_seconds)
 
+        logger.info(f"[EXPORT] Export completed successfully! Saved to '{self.output_path}' in {time.time() - start_time:.2f}s.")
         self.render_completed.emit(self.output_path)
