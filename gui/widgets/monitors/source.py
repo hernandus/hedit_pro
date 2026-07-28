@@ -19,6 +19,7 @@ from gui.widgets.monitors.viewport import VideoViewportWidget
 from gui.widgets.monitors.scrubber import MonitorScrubberWidget
 from gui.theme import COLOR_BG_DARK, COLOR_DIVIDER, COLOR_BG_HOVER
 from core.logger import get_logger
+from core.proxy import find_proxy_for_source
 
 logger = get_logger()
 
@@ -40,6 +41,11 @@ class SourceMonitorWidget(QWidget):
         self.mark_out = self.total_frames
         self.is_playing = False
         self.clip_data = None
+
+        # Proxy state ─────────────────────────────────────────────────────────
+        self.original_path: str | None = None   # path as imported by the user
+        self.proxy_path: str | None = None       # detected proxy file (may be None)
+        self.proxies_enabled: bool = True        # mirrors btn_proxy.isChecked()
 
         self.cap = None
 
@@ -247,11 +253,75 @@ class SourceMonitorWidget(QWidget):
         self.scrubber.seek_requested.connect(self.seek_to_frame)
         main_layout.addWidget(self.scrubber)
 
+    # ── Proxy toggle logic ────────────────────────────────────────────────────
+
+    def _get_active_path(self) -> str | None:
+        """
+        Returns the path that should currently be decoded:
+        - proxy file if proxies are enabled AND a proxy exists on disk
+        - original file otherwise
+        """
+        if (
+            self.proxies_enabled
+            and self.proxy_path
+            and os.path.exists(self.proxy_path)
+        ):
+            return self.proxy_path
+        return self.original_path
+
+    def _update_proxy_badge(self):
+        """Syncs the viewport proxy badge to reflect current proxy state."""
+        if not self.original_path:
+            self.viewport.set_proxy_badge(None)
+        elif self.proxies_enabled:
+            if self.proxy_path and os.path.exists(self.proxy_path):
+                self.viewport.set_proxy_badge("on")
+            else:
+                self.viewport.set_proxy_badge("missing")
+        else:
+            self.viewport.set_proxy_badge(None)
+
+    def _switch_source(self, new_path: str):
+        """
+        Hot-swap the decode source (cv2 + QMediaPlayer) to *new_path*
+        without resetting marks or current playhead position.
+        """
+        was_playing = self.is_playing
+        if was_playing:
+            self.play_timer.stop()
+            self.player.pause()
+
+        if self.cap:
+            self.cap.release()
+            self.cap = None
+
+        self.cap = cv2.VideoCapture(new_path)
+        self.player.setSource(QUrl.fromLocalFile(new_path))
+
+        # Restore frame position in new source
+        self.seek_to_frame(self.current_frame)
+
+        if was_playing:
+            pos_ms = int((self.current_frame / self.fps) * 1000)
+            self.player.setPosition(pos_ms)
+            self.player.play()
+            self.play_timer.start()
+
+        logger.info(f"[SOURCE MONITOR] Switched decode source → {new_path}")
+
     def _on_proxy_toggled(self, checked: bool):
-        """Toggle PROXIES ON / PROXIES OFF state."""
+        """Toggle PROXIES ON / PROXIES OFF — switches decode source live."""
+        self.proxies_enabled = checked
         self.btn_proxy.setText("PROXIES ON" if checked else "PROXIES OFF")
         self._update_proxy_btn_style()
-        logger.info(f"[SOURCE MONITOR] Proxy mode set to: {'ON' if checked else 'OFF'}")
+
+        if self.original_path:
+            active = self._get_active_path()
+            self._switch_source(active)
+            self._update_proxy_badge()
+
+        logger.info(f"[SOURCE MONITOR] Proxy mode → {'ON' if checked else 'OFF'} "
+                    f"(proxy {'found' if self.proxy_path else 'not found'})")
 
     def _update_proxy_btn_style(self):
         """Set typography style and colors for proxy toggle text button."""
@@ -278,27 +348,40 @@ class SourceMonitorWidget(QWidget):
             self.cap.release()
             self.cap = None
 
+        # ── Proxy detection ───────────────────────────────────────────────────
+        self.original_path = file_path
+        self.proxy_path = find_proxy_for_source(file_path)
+        if self.proxy_path:
+            logger.info(f"[SOURCE MONITOR] Proxy found: {self.proxy_path}")
+        else:
+            logger.debug(f"[SOURCE MONITOR] No proxy found for: {file_path}")
+
+        active_path = self._get_active_path()  # proxy or original per toggle state
+
         detected_fps = fps
         detected_frames = duration_frames
 
-        if os.path.exists(file_path):
-            self.cap = cv2.VideoCapture(file_path)
-            if self.cap.isOpened():
-                c_fps = self.cap.get(cv2.CAP_PROP_FPS)
+        if os.path.exists(file_path):  # always probe original for metadata
+            probe = cv2.VideoCapture(file_path)
+            if probe.isOpened():
+                c_fps = probe.get(cv2.CAP_PROP_FPS)
                 if c_fps and c_fps > 0:
                     detected_fps = float(c_fps)
-                c_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                c_frames = int(probe.get(cv2.CAP_PROP_FRAME_COUNT))
                 if c_frames and c_frames > 0:
                     detected_frames = c_frames
-                logger.info(f"[SOURCE MONITOR] Loaded video stream: {detected_frames} frames @ {detected_fps:.2f} FPS")
+                logger.info(f"[SOURCE MONITOR] {detected_frames} frames @ {detected_fps:.2f} FPS")
+            probe.release()
 
-            self.player.setSource(QUrl.fromLocalFile(file_path))
-            self.player.setPosition(0)
+        # Open decode source (may be proxy)
+        self.cap = cv2.VideoCapture(active_path)
+        self.player.setSource(QUrl.fromLocalFile(active_path))
+        self.player.setPosition(0)
 
         self.fps = detected_fps
         self.total_frames = detected_frames
         self.clip_data = {
-            "path": file_path,
+            "path": file_path,          # always the original path for timeline
             "name": os.path.basename(file_path),
             "duration": self.total_frames,
             "fps": self.fps
@@ -314,6 +397,7 @@ class SourceMonitorWidget(QWidget):
         self.scrubber.set_marks(self.mark_in, self.mark_out)
         self.seek_to_frame(0)
         self.update_timecode_display()
+        self._update_proxy_badge()
 
     def set_mark_in(self):
         self.mark_in = self.current_frame

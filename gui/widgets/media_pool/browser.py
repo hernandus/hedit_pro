@@ -18,8 +18,11 @@ from gui.theme import (
     COLOR_BG_DARK, COLOR_BG_HOVER, COLOR_BG_SELECTED, COLOR_DIVIDER,
     COLOR_TEXT_PRIMARY, COLOR_TEXT_MUTED, COLOR_TEXT_REGULAR, TREE_VIEW_QSS
 )
+from gui.widgets.media_pool.proxy_dialog import CreateProxyDialog
 
 ICONS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../Interface_elements"))
+
+VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.mov', '.avi', '.mxf', '.r3d', '.braw'}
 
 
 def has_audio_stream(path: str) -> bool:
@@ -333,37 +336,9 @@ class MediaPoolWidget(QWidget):
         self._populate_sample_data()
 
     def _populate_sample_data(self):
-        """Initial sample structure matching reference hedit-pro-menu-project.png."""
+        """Initial sample structure containing default bins."""
         self.create_bin("Audio")
-        footage_item = self.create_bin("Footage")
-
-        # Add sample clip items inside Footage
-        for clip_name in ["C0159.MP4", "C0160.MP4", "C0161.MP4", "C0162.MP4"]:
-            item_name = QStandardItem(clip_name)
-            item_name.setIcon(self.icon_video_audio)
-            item_name.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDragEnabled)
-
-            item_fps = QStandardItem("25 fps")
-            item_fps.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-
-            item_video = QStandardItem("1920x1080")
-            item_video.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-
-            item_audio = QStandardItem("48000Hz 16Bit Stereo")
-            item_audio.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-
-            item_status = QStandardItem("Online")
-            item_status.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-
-            item_path = QStandardItem("")
-            item_path.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-
-            item_is_bin = QStandardItem("False")
-            item_is_bin.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-
-            footage_item.appendRow([item_name, item_fps, item_video, item_audio, item_status, item_path, item_is_bin])
-
-        self.tree_view.expand(footage_item.index())
+        self.create_bin("Footage")
 
     def set_project_name(self, name: str):
         self.project_name = name
@@ -556,14 +531,55 @@ class MediaPoolWidget(QWidget):
                     self.media_removed.emit(path_item.text())
                 self.model.removeRow(row)
 
+    def _get_selected_video_paths(self) -> list:
+        """Returns file paths of all selected non-bin video items."""
+        video_paths = []
+        seen = set()
+        for index in self.tree_view.selectedIndexes():
+            if index.column() != 0:
+                continue
+            col6 = self.model.itemFromIndex(index.siblingAtColumn(6))
+            col5 = self.model.itemFromIndex(index.siblingAtColumn(5))
+            if col6 and col6.text() == "True":
+                continue  # skip bins
+            if col5 and col5.text():
+                path = col5.text()
+                ext  = os.path.splitext(path)[1].lower()
+                if ext in VIDEO_EXTENSIONS and path not in seen:
+                    seen.add(path)
+                    video_paths.append(path)
+        return video_paths
+
+    def _on_create_proxy(self):
+        """Opens the Create Proxy Media dialog for the selected video files."""
+        video_paths = self._get_selected_video_paths()
+        if not video_paths:
+            return
+        dlg = CreateProxyDialog(video_paths, parent=self)
+        dlg.exec()
+
     def _show_context_menu(self, position):
         menu = QMenu(self)
         import_action = QAction("Import Media...", self)
         import_action.triggered.connect(self.on_import_click)
         menu.addAction(import_action)
 
-        # If items are selected, add Rename and Delete options to context menu
         if self.tree_view.selectedIndexes():
+            # --- Proxy action (video files only) --------------------------
+            video_paths = self._get_selected_video_paths()
+            if video_paths:
+                menu.addSeparator()
+                n = len(video_paths)
+                label = (
+                    "Create Proxy Media…"
+                    if n == 1
+                    else f"Create Proxy Media…  ({n} files)"
+                )
+                proxy_action = QAction(label, self)
+                proxy_action.triggered.connect(self._on_create_proxy)
+                menu.addAction(proxy_action)
+
+            # --- Standard item actions ------------------------------------
             menu.addSeparator()
             rename_action = QAction("Rename", self)
             rename_action.triggered.connect(self.rename_selected_item)
