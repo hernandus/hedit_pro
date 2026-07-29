@@ -271,7 +271,9 @@ class MediaPoolWidget(QWidget):
         self.shortcut_back.setContext(Qt.WidgetWithChildrenShortcut)
         self.shortcut_back.activated.connect(self.delete_selected_items)
 
-        # Context Menu setup
+        # Context Menu setup on container and tree view
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
         self.tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree_view.customContextMenuRequested.connect(self._show_context_menu)
 
@@ -404,12 +406,37 @@ class MediaPoolWidget(QWidget):
 
     def on_import_click(self):
         file_paths, _ = QFileDialog.getOpenFileNames(
-            self, "Import Media into Project", "", "Video/Audio Files (*.mp4 *.mkv *.mov *.avi *.mp3 *.wav *.png *.jpg);;All Files (*)"
+            self,
+            "Import Media into Project",
+            "",
+            "Media Files (*.mp4 *.mkv *.mov *.avi *.mp3 *.wav *.png *.jpg *.mxf *.braw *.r3d);;All Files (*)"
         )
+        if not file_paths:
+            return
         parent_item = self.get_selected_folder_item()
         for path in file_paths:
             self.add_media_item(path, parent_item=parent_item)
             self.media_imported.emit(path)
+
+    def on_import_folder_click(self):
+        folder_path = QFileDialog.getExistingDirectory(
+            self,
+            "Import Folder into Project",
+            ""
+        )
+        if not folder_path or not os.path.exists(folder_path):
+            return
+
+        folder_name = os.path.basename(folder_path) or folder_path
+        bin_item = self.create_bin(folder_name)
+
+        for root, _, files in os.walk(folder_path):
+            for file in files:
+                ext = os.path.splitext(file)[1].lower()
+                if ext in VIDEO_EXTENSIONS or ext in ['.mp3', '.wav', '.aac', '.flac', '.m4a', '.png', '.jpg']:
+                    full_p = os.path.join(root, file)
+                    self.add_media_item(full_p, parent_item=bin_item)
+                    self.media_imported.emit(full_p)
 
     def add_media_item(self, path: str, parent_item=None):
         name = os.path.basename(path)
@@ -460,6 +487,10 @@ class MediaPoolWidget(QWidget):
             self.model.appendRow(row_items)
 
     def _on_item_double_clicked(self, index):
+        if not index.isValid():
+            self.on_import_click()
+            return
+
         col5_path_idx = index.siblingAtColumn(5)
         col6_bin_idx = index.siblingAtColumn(6)
 
@@ -560,9 +591,18 @@ class MediaPoolWidget(QWidget):
 
     def _show_context_menu(self, position):
         menu = QMenu(self)
+
         import_action = QAction("Import Media...", self)
         import_action.triggered.connect(self.on_import_click)
         menu.addAction(import_action)
+
+        import_folder_action = QAction("Import Folder...", self)
+        import_folder_action.triggered.connect(self.on_import_folder_click)
+        menu.addAction(import_folder_action)
+
+        new_bin_action = QAction("New Bin", self)
+        new_bin_action.triggered.connect(lambda: self.create_bin())
+        menu.addAction(new_bin_action)
 
         if self.tree_view.selectedIndexes():
             # --- Proxy action (video files only) --------------------------
@@ -589,7 +629,13 @@ class MediaPoolWidget(QWidget):
             delete_action.triggered.connect(self.delete_selected_items)
             menu.addAction(delete_action)
 
-        menu.exec(self.tree_view.viewport().mapToGlobal(position))
+        sender = self.sender()
+        if sender == self.tree_view:
+            global_pos = self.tree_view.viewport().mapToGlobal(position)
+        else:
+            global_pos = self.mapToGlobal(position)
+
+        menu.exec(global_pos)
 
 
 
