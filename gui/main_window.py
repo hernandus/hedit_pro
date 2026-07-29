@@ -47,6 +47,7 @@ class MainWindow(QMainWindow):
             QMainWindow.AnimatedDocks |
             QMainWindow.GroupedDragging
         )
+        self.setTabPosition(Qt.AllDockWidgetAreas, QTabWidget.North)
 
         self.setup_menubar()
         self.setup_statusbar()

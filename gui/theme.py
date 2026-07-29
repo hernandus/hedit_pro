@@ -90,6 +90,33 @@ QDockWidget[active="true"]::title {{
     border-bottom: 2px solid #2680EB;
 }}
 
+/* Dock Tab Bar (Top Tabs like Premiere Pro) */
+QTabBar {{
+    background-color: {COLOR_BG_DARK};
+    border-bottom: 1px solid {COLOR_DIVIDER};
+}}
+
+QTabBar::tab {{
+    background-color: {COLOR_BG_DARK};
+    color: {COLOR_TEXT_MUTED};
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: bold;
+    border: none;
+    border-bottom: 2px solid transparent;
+}}
+
+QTabBar::tab:selected {{
+    background-color: {COLOR_BG_HOVER};
+    color: {COLOR_TEXT_PRIMARY};
+    border-bottom: 2px solid #2680EB;
+}}
+
+QTabBar::tab:hover:!selected {{
+    background-color: {COLOR_BG_HOVER};
+    color: {COLOR_TEXT_REGULAR};
+}}
+
 /* Scrollbars */
 QScrollBar:vertical {{
     background-color: {COLOR_BG_DARK};
