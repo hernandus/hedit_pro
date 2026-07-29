@@ -23,6 +23,7 @@ from gui.widgets.inspector.transform import EffectControlsWidget
 from gui.widgets.color.wheels import LumetriColorWidget
 from gui.widgets.export_dialog import ExportDialog
 from gui.widgets.log_viewer import LogViewerDialog
+from gui.widgets.panel_header import setup_panel_headers
 
 logger = get_logger()
 
@@ -52,6 +53,7 @@ class MainWindow(QMainWindow):
         self.setup_menubar()
         self.setup_statusbar()
         self.setup_docks()
+        setup_panel_headers(self)
         self.connect_signals()
         self.setup_shortcuts()
         self.setup_focus_tracking()
