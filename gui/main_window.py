@@ -7,9 +7,9 @@ Includes System Log Viewer & Logger integration.
 
 from PySide6.QtWidgets import (
     QMainWindow, QDockWidget, QTabWidget, QStatusBar, QMenuBar,
-    QMenu, QLabel, QWidget, QHBoxLayout
+    QMenu, QLabel, QWidget, QHBoxLayout, QApplication
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QEvent
 from PySide6.QtGui import QIcon, QKeySequence, QAction, QShortcut
 
 from core.engine import MLTEngine
@@ -53,6 +53,7 @@ class MainWindow(QMainWindow):
         self.setup_docks()
         self.connect_signals()
         self.setup_shortcuts()
+        self.setup_focus_tracking()
 
         logger.info("[UI] MainWindow layout and docks initialized successfully.")
 
@@ -163,6 +164,64 @@ class MainWindow(QMainWindow):
         # Adjust initial relative sizes
         self.resizeDocks([self.dock_media, self.dock_source, self.dock_program], [240, 520, 520], Qt.Horizontal)
         self.resizeDocks([self.dock_source, self.dock_timeline], [420, 260], Qt.Vertical)
+
+    def setup_focus_tracking(self):
+        self._active_dock = None
+
+        # Enable WA_StyledBackground on all dock inner widgets so QSS border renders
+        for dock in (self.dock_media, self.dock_source, self.dock_program,
+                     self.dock_timeline, self.dock_effect_controls, self.dock_lumetri):
+            w = dock.widget()
+            if w:
+                w.setAttribute(Qt.WA_StyledBackground, True)
+
+        app = QApplication.instance()
+        if app:
+            app.focusChanged.connect(self._on_focus_changed)
+            app.installEventFilter(self)
+        self._set_active_dock(self.dock_timeline)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.MouseButtonPress:
+            curr = obj
+            while curr and not isinstance(curr, QDockWidget):
+                curr = curr.parentWidget() if hasattr(curr, 'parentWidget') else None
+            if curr and isinstance(curr, QDockWidget):
+                self._set_active_dock(curr)
+        return super().eventFilter(obj, event)
+
+    def _on_focus_changed(self, old_widget, new_widget):
+        if not new_widget:
+            return
+
+        dock = new_widget
+        while dock and not isinstance(dock, QDockWidget):
+            dock = dock.parentWidget()
+
+        if dock and isinstance(dock, QDockWidget):
+            self._set_active_dock(dock)
+
+    def _set_active_dock(self, dock: QDockWidget):
+        if dock and dock != self._active_dock:
+            if self._active_dock:
+                self._active_dock.setProperty("active", False)
+                self._active_dock.style().unpolish(self._active_dock)
+                self._active_dock.style().polish(self._active_dock)
+                w_old = self._active_dock.widget()
+                if w_old:
+                    w_old.setProperty("active", False)
+                    w_old.style().unpolish(w_old)
+                    w_old.style().polish(w_old)
+
+            self._active_dock = dock
+            self._active_dock.setProperty("active", True)
+            self._active_dock.style().unpolish(self._active_dock)
+            self._active_dock.style().polish(self._active_dock)
+            w_new = self._active_dock.widget()
+            if w_new:
+                w_new.setProperty("active", True)
+                w_new.style().unpolish(w_new)
+                w_new.style().polish(w_new)
 
     def connect_signals(self):
         # Pass sequence model to Program Monitor for timeline preview rendering

@@ -71,6 +71,10 @@ QDockWidget {{
     background-color: {COLOR_BG_DARK};
 }}
 
+QDockWidget[active="true"] {{
+    border: 2px solid #2680EB;
+}}
+
 QDockWidget::title {{
     background-color: {COLOR_BG_DARK};
     padding: 6px 10px;
@@ -80,8 +84,10 @@ QDockWidget::title {{
     border-bottom: 1px solid {COLOR_DIVIDER};
 }}
 
-QDockWidget::title:focus {{
+QDockWidget[active="true"]::title {{
     color: {COLOR_TEXT_PRIMARY};
+    background-color: #242424;
+    border-bottom: 2px solid #2680EB;
 }}
 
 /* Scrollbars */
