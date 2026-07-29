@@ -93,7 +93,8 @@ QDockWidget[active="true"]::title {{
 /* Dock Tab Bar (Top Tabs like Premiere Pro) */
 QTabBar {{
     background-color: {COLOR_BG_DARK};
-    border-bottom: 1px solid {COLOR_DIVIDER};
+    border: none;
+    border-bottom: none;
 }}
 
 QTabBar::tab {{
@@ -107,7 +108,7 @@ QTabBar::tab {{
 }}
 
 QTabBar::tab:selected {{
-    background-color: {COLOR_BG_HOVER};
+    background-color: {COLOR_BG_DARK};
     color: {COLOR_TEXT_PRIMARY};
     border-bottom: 2px solid #2680EB;
 }}

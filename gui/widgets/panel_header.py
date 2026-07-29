@@ -37,7 +37,7 @@ def create_panel_context_menu(dock: QDockWidget, parent: QWidget = None) -> QMen
 
 
 class PremiereDockTitleBar(QWidget):
-    """Custom title bar for single QDockWidget instances with title and hamburger menu (≡)."""
+    """Custom title bar for single (un-tabified) QDockWidget instances with title and hamburger menu (≡)."""
 
     def __init__(self, dock: QDockWidget, title_text: str = None, parent=None):
         super().__init__(parent or dock)
@@ -97,6 +97,7 @@ def setup_panel_headers(main_window: QMainWindow):
     """
     Configures title bar widgets and top tab bar hamburger menus for all docks in MainWindow.
     Truncates panel titles to 26 chars max and attaches hamburger menu (≡) and context menus.
+    For tabified dock groups, hides inner dock title bars so titles/menus do not repeat.
     """
     all_docks = [
         main_window.dock_media,
@@ -113,21 +114,27 @@ def setup_panel_headers(main_window: QMainWindow):
         dock_title_map[raw] = dock
         dock_title_map[truncate_title(raw, 26)] = dock
 
-        # Set custom title bar for single dock view
-        title_bar = PremiereDockTitleBar(dock, raw)
-        dock.setTitleBarWidget(title_bar)
+        # Check if dock is tabified in a group
+        if len(main_window.tabifiedDockWidgets(dock)) > 0:
+            # Tabified dock -> hide individual dock title bar to avoid repetition under top QTabBar
+            empty_title = QWidget()
+            empty_title.setFixedHeight(0)
+            dock.setTitleBarWidget(empty_title)
+        else:
+            # Standalone dock -> show custom Premiere Pro title bar
+            title_bar = PremiereDockTitleBar(dock, raw)
+            dock.setTitleBarWidget(title_bar)
 
     # Attach context menu and hamburger buttons to top tab bars (QTabBar)
     for tb in main_window.findChildren(QTabBar):
         # Skip inner QTabWidget tab bars (e.g. Lumetri color tabs)
         if tb.parentWidget() and not isinstance(tb.parentWidget(), QMainWindow):
-            # Check if parent is a dock container
             parent_name = type(tb.parentWidget()).__name__
             if "Dock" not in parent_name and "Main" not in parent_name:
                 continue
 
         tb.setContextMenuPolicy(Qt.CustomContextMenu)
-        
+
         def _on_tab_context_menu(pos, tabBar=tb):
             idx = tabBar.tabAt(pos)
             if idx >= 0:
