@@ -1,6 +1,6 @@
 """
 Premiere Pro Style Panel Headers, Hamburger Context Menu (≡), and Title Truncation for Hedit Pro.
-Supports single dock custom title bars and tabified QTabBar header option menus.
+Supports single dock custom title bars, tabified QTabBar header option menus, and dynamic layout tracking.
 """
 
 from PySide6.QtWidgets import (
@@ -48,7 +48,7 @@ class PremiereDockTitleBar(QWidget):
         layout.setContentsMargins(8, 4, 6, 4)
         layout.setSpacing(4)
 
-        display_text = truncate_title(self.raw_title, max_chars=26)
+        display_text = truncate_title(self.raw_title, max_chars=30)
         self.lbl_title = QLabel(display_text)
         self.lbl_title.setStyleSheet("font-weight: bold; font-size: 11px; color: #A0A0A0;")
         self.lbl_title.setToolTip(self.raw_title)
@@ -81,7 +81,7 @@ class PremiereDockTitleBar(QWidget):
 
     def set_title(self, text: str):
         self.raw_title = text
-        self.lbl_title.setText(truncate_title(text, max_chars=26))
+        self.lbl_title.setText(truncate_title(text, max_chars=30))
         self.lbl_title.setToolTip(text)
 
     def _show_menu(self):
@@ -93,89 +93,127 @@ class PremiereDockTitleBar(QWidget):
         menu.exec(event.globalPos())
 
 
-def setup_panel_headers(main_window: QMainWindow):
+class PanelHeaderManager(QObject):
     """
-    Configures title bar widgets and top tab bar hamburger menus for all docks in MainWindow.
-    Truncates panel titles to 26 chars max and attaches hamburger menu (≡) and context menus.
-    For tabified dock groups, hides inner dock title bars so titles/menus do not repeat.
+    Monitors layout changes, dock drags, tab moves, and float state changes
+    to keep hamburger buttons (≡), truncated titles, and custom title bars in sync dynamically.
     """
-    all_docks = [
-        main_window.dock_media,
-        main_window.dock_source,
-        main_window.dock_program,
-        main_window.dock_timeline,
-        main_window.dock_effect_controls,
-        main_window.dock_lumetri
-    ]
 
-    dock_title_map = {}
-    for dock in all_docks:
-        raw = dock.windowTitle()
-        dock_title_map[raw] = dock
-        dock_title_map[truncate_title(raw, 26)] = dock
+    def __init__(self, main_window: QMainWindow):
+        super().__init__(main_window)
+        self.main_window = main_window
+        self._all_docks = [
+            main_window.dock_media,
+            main_window.dock_source,
+            main_window.dock_program,
+            main_window.dock_timeline,
+            main_window.dock_effect_controls,
+            main_window.dock_lumetri
+        ]
 
-        # Check if dock is tabified in a group
-        if len(main_window.tabifiedDockWidgets(dock)) > 0:
-            # Tabified dock -> hide individual dock title bar to avoid repetition under top QTabBar
-            empty_title = QWidget()
-            empty_title.setFixedHeight(0)
-            dock.setTitleBarWidget(empty_title)
-        else:
-            # Standalone dock -> show custom Premiere Pro title bar
-            title_bar = PremiereDockTitleBar(dock, raw)
-            dock.setTitleBarWidget(title_bar)
+        # Connect dock float / location change signals
+        for dock in self._all_docks:
+            dock.topLevelChanged.connect(self.refresh)
+            dock.dockLocationChanged.connect(self.refresh)
 
-    # Attach context menu and hamburger buttons to top tab bars (QTabBar)
-    for tb in main_window.findChildren(QTabBar):
-        # Skip inner QTabWidget tab bars (e.g. Lumetri color tabs)
-        if tb.parentWidget() and not isinstance(tb.parentWidget(), QMainWindow):
-            parent_name = type(tb.parentWidget()).__name__
-            if "Dock" not in parent_name and "Main" not in parent_name:
-                continue
+        # Install event filter on main window to catch layout / child changes
+        main_window.installEventFilter(self)
 
-        tb.setContextMenuPolicy(Qt.CustomContextMenu)
-        tb.setElideMode(Qt.ElideNone)
+        # Initial refresh
+        self.refresh()
 
-        def _on_tab_context_menu(pos, tabBar=tb):
-            idx = tabBar.tabAt(pos)
-            if idx >= 0:
-                text = tabBar.tabText(idx)
-                dock = dock_title_map.get(text)
-                if dock:
-                    menu = create_panel_context_menu(dock, tabBar)
-                    menu.exec(tabBar.mapToGlobal(pos))
+    def eventFilter(self, obj, event):
+        if event.type() in (QEvent.ChildAdded, QEvent.ChildRemoved, QEvent.LayoutRequest):
+            self.refresh()
+        return super().eventFilter(obj, event)
 
-        tb.customContextMenuRequested.connect(_on_tab_context_menu)
+    def refresh(self):
+        try:
+            if not self.main_window or not self.main_window.isVisible():
+                return
+        except RuntimeError:
+            return
 
-        for i in range(tb.count()):
-            orig_text = tb.tabText(i)
-            truncated = truncate_title(orig_text, 30)
-            tb.setTabText(i, truncated)
-            tb.setTabToolTip(i, orig_text)
+        dock_title_map = {}
+        for dock in self._all_docks:
+            raw = dock.windowTitle()
+            dock_title_map[raw] = dock
+            dock_title_map[truncate_title(raw, 30)] = dock
 
-            dock = dock_title_map.get(orig_text) or dock_title_map.get(truncated)
+            # Update title bar widget based on standalone vs tabified state
+            is_tabbed = len(self.main_window.tabifiedDockWidgets(dock)) > 0
+            if is_tabbed:
+                if type(dock.titleBarWidget()).__name__ != "QWidget":
+                    empty_title = QWidget()
+                    empty_title.setFixedHeight(0)
+                    dock.setTitleBarWidget(empty_title)
+            else:
+                if type(dock.titleBarWidget()).__name__ != "PremiereDockTitleBar":
+                    dock.setTitleBarWidget(PremiereDockTitleBar(dock, raw))
+
+        # Scan all QTabBar instances
+        for tb in self.main_window.findChildren(QTabBar):
+            if tb.parentWidget() and not isinstance(tb.parentWidget(), QMainWindow):
+                parent_name = type(tb.parentWidget()).__name__
+                if "Dock" not in parent_name and "Main" not in parent_name:
+                    continue
+
+            tb.setContextMenuPolicy(Qt.CustomContextMenu)
+            tb.setElideMode(Qt.ElideNone)
+
+            def _make_context_handler(tabBar=tb):
+                return lambda pos: self._on_tab_context_menu(tabBar, pos, dock_title_map)
+
+            if not tb.property("context_connected"):
+                tb.setProperty("context_connected", True)
+                tb.customContextMenuRequested.connect(_make_context_handler(tb))
+
+            for i in range(tb.count()):
+                orig_text = tb.tabText(i)
+                truncated = truncate_title(orig_text, 30)
+                if orig_text != truncated:
+                    tb.setTabText(i, truncated)
+                tb.setTabToolTip(i, orig_text)
+
+                # Ensure hamburger button is attached to each tab
+                if not tb.tabButton(i, QTabBar.RightSide):
+                    dock = dock_title_map.get(orig_text) or dock_title_map.get(truncated)
+                    if dock:
+                        btn = QToolButton(tb)
+                        btn.setText("≡")
+                        btn.setToolTip("Panel Options")
+                        btn.setFixedSize(16, 16)
+                        btn.setStyleSheet("""
+                            QToolButton {
+                                background: transparent;
+                                border: none;
+                                color: #A0A0A0;
+                                font-weight: bold;
+                                font-size: 11px;
+                                padding: 0px;
+                            }
+                            QToolButton:hover {
+                                color: #FFFFFF;
+                                background-color: #333333;
+                                border-radius: 2px;
+                            }
+                        """)
+                        def _make_show_menu(d=dock, b=btn):
+                            return lambda: create_panel_context_menu(d, b).exec(b.mapToGlobal(QPoint(0, b.height())))
+
+                        btn.clicked.connect(_make_show_menu(dock, btn))
+                        tb.setTabButton(i, QTabBar.RightSide, btn)
+
+    def _on_tab_context_menu(self, tabBar, pos, dock_title_map):
+        idx = tabBar.tabAt(pos)
+        if idx >= 0:
+            text = tabBar.tabText(idx)
+            dock = dock_title_map.get(text)
             if dock:
-                btn = QToolButton(tb)
-                btn.setText("≡")
-                btn.setToolTip("Panel Options")
-                btn.setFixedSize(16, 16)
-                btn.setStyleSheet("""
-                    QToolButton {
-                        background: transparent;
-                        border: none;
-                        color: #A0A0A0;
-                        font-weight: bold;
-                        font-size: 11px;
-                        padding: 0px;
-                    }
-                    QToolButton:hover {
-                        color: #FFFFFF;
-                        background-color: #333333;
-                        border-radius: 2px;
-                    }
-                """)
-                def _make_show_menu(d=dock, b=btn):
-                    return lambda: create_panel_context_menu(d, b).exec(b.mapToGlobal(QPoint(0, b.height())))
+                menu = create_panel_context_menu(dock, tabBar)
+                menu.exec(tabBar.mapToGlobal(pos))
 
-                btn.clicked.connect(_make_show_menu(dock, btn))
-                tb.setTabButton(i, QTabBar.RightSide, btn)
+
+def setup_panel_headers(main_window: QMainWindow) -> PanelHeaderManager:
+    """Configures dynamic PanelHeaderManager for MainWindow."""
+    return PanelHeaderManager(main_window)
