@@ -53,7 +53,7 @@ class MainWindow(QMainWindow):
         self.setup_menubar()
         self.setup_statusbar()
         self.setup_docks()
-        setup_panel_headers(self)
+        self.header_manager = setup_panel_headers(self)
         self.connect_signals()
         self.setup_shortcuts()
         self.setup_focus_tracking()
