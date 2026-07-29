@@ -33,6 +33,10 @@ class HeditProStyle(QProxyStyle):
         if element == QStyle.PE_IndicatorDockWidgetResizeHandle:
             self._draw_separator(option, painter)
             return
+        elif element == QStyle.PE_FrameTabBarBase:
+            # Erase default light-gray horizontal line under QTabBar by filling with panel background
+            painter.fillRect(option.rect, QColor(COLOR_BG_DARK))
+            return
         super().drawPrimitive(element, option, painter, widget)
 
     def _draw_separator(self, option: QStyleOption, painter: QPainter):

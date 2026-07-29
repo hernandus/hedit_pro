@@ -100,7 +100,7 @@ QTabBar {{
 QTabBar::tab {{
     background-color: {COLOR_BG_DARK};
     color: {COLOR_TEXT_MUTED};
-    padding: 6px 12px;
+    padding: 6px 6px;
     font-size: 11px;
     font-weight: bold;
     border: none;

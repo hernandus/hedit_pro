@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt, QPoint, QObject, QEvent
 from PySide6.QtGui import QAction, QFont
 
 
-def truncate_title(title: str, max_chars: int = 26) -> str:
+def truncate_title(title: str, max_chars: int = 30) -> str:
     """Truncates panel titles longer than max_chars with ellipsis (...)."""
     if not title:
         return ""
@@ -134,6 +134,7 @@ def setup_panel_headers(main_window: QMainWindow):
                 continue
 
         tb.setContextMenuPolicy(Qt.CustomContextMenu)
+        tb.setElideMode(Qt.ElideNone)
 
         def _on_tab_context_menu(pos, tabBar=tb):
             idx = tabBar.tabAt(pos)
@@ -148,7 +149,7 @@ def setup_panel_headers(main_window: QMainWindow):
 
         for i in range(tb.count()):
             orig_text = tb.tabText(i)
-            truncated = truncate_title(orig_text, 26)
+            truncated = truncate_title(orig_text, 30)
             tb.setTabText(i, truncated)
             tb.setTabToolTip(i, orig_text)
 
