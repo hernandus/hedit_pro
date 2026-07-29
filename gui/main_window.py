@@ -166,7 +166,7 @@ class MainWindow(QMainWindow):
 
         # Adjust initial relative sizes
         self.resizeDocks([self.dock_media, self.dock_source, self.dock_program], [240, 520, 520], Qt.Horizontal)
-        self.resizeDocks([self.dock_source, self.dock_timeline], [420, 260], Qt.Vertical)
+        self.resizeDocks([self.dock_source, self.dock_timeline], [600, 220], Qt.Vertical)
 
     def setup_focus_tracking(self):
         self._active_dock = None

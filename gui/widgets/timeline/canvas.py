@@ -6,7 +6,7 @@ High-performance QGraphicsView timeline renderer supporting NLE tools (V, C, B, 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGraphicsView, QGraphicsScene, QGraphicsRectItem, QGraphicsLineItem,
-    QGraphicsTextItem, QFrame, QSplitter
+    QGraphicsTextItem, QFrame, QSplitter, QScrollArea
 )
 from PySide6.QtCore import Qt, Signal, QRectF, QPointF
 from PySide6.QtGui import QColor, QPen, QBrush, QFont, QPolygonF, QPainterPath
@@ -102,6 +102,7 @@ class TimelineCanvasWidget(QWidget):
         self.init_ui()
 
     def init_ui(self):
+        self.setMinimumHeight(60)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -175,9 +176,15 @@ class TimelineCanvasWidget(QWidget):
             h = TrackHeaderWidget(name, is_audio=is_audio)
             h.setFixedHeight(48)
             headers_layout.addWidget(h)
-        headers_layout.addStretch()
+        headers_scroll = QScrollArea()
+        headers_scroll.setFixedWidth(130)
+        headers_scroll.setWidgetResizable(True)
+        headers_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        headers_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        headers_scroll.setStyleSheet("background-color: #1a1a1a; border-right: 1px solid #2b2b2b; border-top: none; border-bottom: none; border-left: none;")
+        headers_scroll.setWidget(headers_container)
 
-        splitter.addWidget(headers_container)
+        splitter.addWidget(headers_scroll)
 
         # Graphics Scene & View for Timeline Tracks
         self.scene = QGraphicsScene(self)
@@ -189,6 +196,9 @@ class TimelineCanvasWidget(QWidget):
         self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.view.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.view.mousePressEvent = self._on_view_mouse_press
+
+        # Sync vertical scrolling between timeline graphics view and track headers
+        self.view.verticalScrollBar().valueChanged.connect(headers_scroll.verticalScrollBar().setValue)
 
         splitter.addWidget(self.view)
         splitter.setSizes([130, 1400])
