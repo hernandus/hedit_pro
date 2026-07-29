@@ -63,15 +63,7 @@ QMainWindow {{
     background-color: {COLOR_BG_DARK};
 }}
 
-QMainWindow::separator {{
-    background-color: {COLOR_DIVIDER};
-    width: 2px;
-    height: 2px;
-}}
-
-QMainWindow::separator:hover {{
-    background-color: {COLOR_BG_SELECTED};
-}}
+/* Separator rendering is handled by HeditProStyle (gui/style.py) */
 
 /* Dock Widgets & Panels */
 QDockWidget {{

@@ -12,6 +12,7 @@ from PySide6.QtCore import Qt
 
 from core.logger import HeditLogger, get_logger
 from gui.theme import PREMIERE_DARK_STYLESHEET
+from gui.style import HeditProStyle
 from gui.main_window import MainWindow
 
 
@@ -33,7 +34,10 @@ def main():
     app.setApplicationName("Hedit Pro")
     app.setOrganizationName("Hedit")
 
-    # 3. Apply Premiere Pro Charcoal Dark Theme
+    # 3. Install custom style (wide dock separator grab zones)
+    app.setStyle(HeditProStyle())
+
+    # 4. Apply Premiere Pro Charcoal Dark Theme
     logger.info("[UI] Applying Premiere Pro Charcoal Dark QSS stylesheet.")
     app.setStyleSheet(PREMIERE_DARK_STYLESHEET)
 
