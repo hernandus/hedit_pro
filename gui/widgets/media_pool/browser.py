@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QTreeView, QHeaderView, QFileDialog, QMenu, QToolButton, QMessageBox,
     QAbstractItemView, QDockWidget
 )
-from PySide6.QtCore import Qt, Signal, QSize, QModelIndex, QPointF
+from PySide6.QtCore import Qt, Signal, QSize, QModelIndex, QPointF, QTimer
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction, QKeySequence, QShortcut, QColor, QPen, QPolygonF, QCursor
 
 from gui.utils.timecode import frames_to_timecode
@@ -409,7 +409,8 @@ class MediaPoolWidget(QWidget):
             self,
             "Import Media into Project",
             "",
-            "Media Files (*.mp4 *.mkv *.mov *.avi *.mp3 *.wav *.png *.jpg *.mxf *.braw *.r3d);;All Files (*)"
+            "Media Files (*.mp4 *.mkv *.mov *.avi *.mp3 *.wav *.png *.jpg *.mxf *.braw *.r3d);;All Files (*)",
+            options=QFileDialog.DontUseNativeDialog
         )
         if not file_paths:
             return
@@ -422,7 +423,8 @@ class MediaPoolWidget(QWidget):
         folder_path = QFileDialog.getExistingDirectory(
             self,
             "Import Folder into Project",
-            ""
+            "",
+            options=QFileDialog.DontUseNativeDialog
         )
         if not folder_path or not os.path.exists(folder_path):
             return
@@ -593,15 +595,15 @@ class MediaPoolWidget(QWidget):
         menu = QMenu(self)
 
         import_action = QAction("Import Media...", self)
-        import_action.triggered.connect(self.on_import_click)
+        import_action.triggered.connect(lambda: QTimer.singleShot(0, self.on_import_click))
         menu.addAction(import_action)
 
         import_folder_action = QAction("Import Folder...", self)
-        import_folder_action.triggered.connect(self.on_import_folder_click)
+        import_folder_action.triggered.connect(lambda: QTimer.singleShot(0, self.on_import_folder_click))
         menu.addAction(import_folder_action)
 
         new_bin_action = QAction("New Bin", self)
-        new_bin_action.triggered.connect(lambda: self.create_bin())
+        new_bin_action.triggered.connect(lambda: QTimer.singleShot(0, lambda: self.create_bin()))
         menu.addAction(new_bin_action)
 
         if self.tree_view.selectedIndexes():
@@ -616,17 +618,17 @@ class MediaPoolWidget(QWidget):
                     else f"Create Proxy Media…  ({n} files)"
                 )
                 proxy_action = QAction(label, self)
-                proxy_action.triggered.connect(self._on_create_proxy)
+                proxy_action.triggered.connect(lambda: QTimer.singleShot(0, self._on_create_proxy))
                 menu.addAction(proxy_action)
 
             # --- Standard item actions ------------------------------------
             menu.addSeparator()
             rename_action = QAction("Rename", self)
-            rename_action.triggered.connect(self.rename_selected_item)
+            rename_action.triggered.connect(lambda: QTimer.singleShot(0, self.rename_selected_item))
             menu.addAction(rename_action)
 
             delete_action = QAction("Delete", self)
-            delete_action.triggered.connect(self.delete_selected_items)
+            delete_action.triggered.connect(lambda: QTimer.singleShot(0, self.delete_selected_items))
             menu.addAction(delete_action)
 
         sender = self.sender()
