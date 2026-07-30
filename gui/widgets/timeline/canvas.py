@@ -33,6 +33,15 @@ class CompactScrollArea(QScrollArea):
         return QSize(140, 40)
     def minimumSizeHint(self):
         return QSize(140, 40)
+    def wheelEvent(self, event):
+        # Redirect mouse wheel event to vertical scrollbar even when hidden
+        delta = event.angleDelta().y()
+        if delta != 0:
+            val = self.verticalScrollBar().value()
+            self.verticalScrollBar().setValue(val - (delta // 2))
+            event.accept()
+        else:
+            super().wheelEvent(event)
 
 
 class ClipGraphicsItem(QGraphicsRectItem):
@@ -217,7 +226,7 @@ class TimelineCanvasWidget(QWidget):
         self.headers_scroll.setWidgetResizable(False)
         self.headers_scroll.setFrameShape(QFrame.NoFrame)
         self.headers_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.headers_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.headers_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.headers_scroll.setStyleSheet("background-color: #1a1a1a; border-right: 1px solid #2b2b2b; border-top: none; border-bottom: none; border-left: none; padding: 0px; margin: 0px;")
         self.headers_scroll.setWidget(self.headers_container)
 
