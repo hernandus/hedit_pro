@@ -102,14 +102,7 @@ class PanelHeaderManager(QObject):
     def __init__(self, main_window: QMainWindow):
         super().__init__(main_window)
         self.main_window = main_window
-        self._all_docks = [
-            main_window.dock_media,
-            main_window.dock_source,
-            main_window.dock_program,
-            main_window.dock_timeline,
-            main_window.dock_effect_controls,
-            main_window.dock_lumetri
-        ]
+        self._all_docks = main_window.findChildren(QDockWidget)
 
         # Connect dock float / location change signals
         for dock in self._all_docks:

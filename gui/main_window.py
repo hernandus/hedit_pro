@@ -135,34 +135,32 @@ class MainWindow(QMainWindow):
 
         # 4. Program Monitor Dock (Top Right)
         self.dock_program = QDockWidget("Program Monitor", self)
-        prog_container = QWidget()
-        prog_layout = QHBoxLayout(prog_container)
-        prog_layout.setContentsMargins(0, 0, 0, 0)
-        prog_layout.setSpacing(2)
-
         self.program_monitor = ProgramMonitorWidget()
-        self.vu_meter = StereoVUMeterWidget()
-        prog_layout.addWidget(self.program_monitor, stretch=1)
-        prog_layout.addWidget(self.vu_meter)
-        self.dock_program.setWidget(prog_container)
+        self.dock_program.setWidget(self.program_monitor)
 
-        # 5. Lumetri Color Dock (Decoupled Independent Window / Dock)
+        # 5. Audio Meters / VU Meter Dock (Dedicated Independent Dock)
+        self.vu_meter = StereoVUMeterWidget()
+        self.dock_vu_meter = QDockWidget("Audio Meters", self)
+        self.dock_vu_meter.setWidget(self.vu_meter)
+
+        # 6. Lumetri Color Dock (Decoupled Independent Window / Dock)
         self.color_widget = LumetriColorWidget()
         self.dock_lumetri = QDockWidget("Lumetri Color", self)
         self.dock_lumetri.setWidget(self.color_widget)
 
-        # 6. Timeline Dock (Bottom, spanning full width) - uses CompactDockWidget for unconstrained shrink
+        # 7. Timeline Dock (Bottom, spanning full width) - uses CompactDockWidget for unconstrained shrink
         self.dock_timeline = CompactDockWidget("Timeline: Main Sequence", self)
         self.timeline_widget = TimelineCanvasWidget()
         self.dock_timeline.setWidget(self.timeline_widget)
 
-        # Arrange Docks per User Layout (Top Row: Media Pool | Source Monitor | Program Monitor, Bottom Row: Timeline)
+        # Arrange Docks per User Layout (Top Row: Media Pool | Source Monitor | Program Monitor | Audio Meters, Bottom Row: Timeline)
         self.setCorner(Qt.BottomLeftCorner, Qt.BottomDockWidgetArea)
         self.setCorner(Qt.BottomRightCorner, Qt.BottomDockWidgetArea)
 
         self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_media)
         self.splitDockWidget(self.dock_media, self.dock_source, Qt.Horizontal)
         self.splitDockWidget(self.dock_source, self.dock_program, Qt.Horizontal)
+        self.splitDockWidget(self.dock_program, self.dock_vu_meter, Qt.Horizontal)
 
         self.tabifyDockWidget(self.dock_source, self.dock_effect_controls)
         self.dock_source.raise_()
@@ -173,7 +171,7 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.BottomDockWidgetArea, self.dock_timeline)
 
         # Adjust initial relative sizes
-        self.resizeDocks([self.dock_media, self.dock_source, self.dock_program], [240, 520, 520], Qt.Horizontal)
+        self.resizeDocks([self.dock_media, self.dock_source, self.dock_program, self.dock_vu_meter], [240, 480, 480, 80], Qt.Horizontal)
         self.resizeDocks([self.dock_source, self.dock_timeline], [600, 220], Qt.Vertical)
 
         # Fix: Qt necesita un centralWidget() con slack vertical para que el
@@ -189,8 +187,10 @@ class MainWindow(QMainWindow):
 
         # Enable WA_StyledBackground on all dock inner widgets so QSS border renders
         for dock in (self.dock_media, self.dock_source, self.dock_program,
-                     self.dock_timeline, self.dock_effect_controls, self.dock_lumetri):
-            dock.setMinimumSize(100, 40)
+                     self.dock_timeline, self.dock_effect_controls, self.dock_lumetri,
+                     self.dock_vu_meter):
+            min_w = 50 if dock == self.dock_vu_meter else 100
+            dock.setMinimumSize(min_w, 40)
             w = dock.widget()
             if w:
                 w.setAttribute(Qt.WA_StyledBackground, True)
