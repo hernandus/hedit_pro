@@ -25,6 +25,14 @@ from gui.widgets.export_dialog import ExportDialog
 from gui.widgets.log_viewer import LogViewerDialog
 from gui.widgets.panel_header import setup_panel_headers
 
+
+class CompactDockWidget(QDockWidget):
+    """QDockWidget subclass with a compact sizeHint to let Qt's dock layout shrink it freely."""
+    def sizeHint(self):
+        return QSize(200, 66)
+    def minimumSizeHint(self):
+        return QSize(200, 66)
+
 logger = get_logger()
 
 
@@ -143,8 +151,8 @@ class MainWindow(QMainWindow):
         self.dock_lumetri = QDockWidget("Lumetri Color", self)
         self.dock_lumetri.setWidget(self.color_widget)
 
-        # 6. Timeline Dock (Bottom Right)
-        self.dock_timeline = QDockWidget("Timeline: Main Sequence", self)
+        # 6. Timeline Dock (Bottom, spanning full width) - uses CompactDockWidget for unconstrained shrink
+        self.dock_timeline = CompactDockWidget("Timeline: Main Sequence", self)
         self.timeline_widget = TimelineCanvasWidget()
         self.dock_timeline.setWidget(self.timeline_widget)
 
@@ -168,12 +176,21 @@ class MainWindow(QMainWindow):
         self.resizeDocks([self.dock_media, self.dock_source, self.dock_program], [240, 520, 520], Qt.Horizontal)
         self.resizeDocks([self.dock_source, self.dock_timeline], [600, 220], Qt.Vertical)
 
+        # Fix: Qt necesita un centralWidget() con slack vertical para que el
+        # separador entre la fila superior y el dock del Timeline sea arrastrable.
+        # Sin esto, BottomDockWidgetArea toma todo el espacio y no permite resize.
+        # Ver: docs/qt_docking_bottom_resize_fix.md
+        _dummy = QWidget()
+        _dummy.setMinimumSize(0, 0)
+        self.setCentralWidget(_dummy)
+
     def setup_focus_tracking(self):
         self._active_dock = None
 
         # Enable WA_StyledBackground on all dock inner widgets so QSS border renders
         for dock in (self.dock_media, self.dock_source, self.dock_program,
                      self.dock_timeline, self.dock_effect_controls, self.dock_lumetri):
+            dock.setMinimumSize(100, 40)
             w = dock.widget()
             if w:
                 w.setAttribute(Qt.WA_StyledBackground, True)

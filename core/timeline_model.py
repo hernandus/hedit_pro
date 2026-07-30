@@ -82,8 +82,10 @@ class SequenceModel:
         self.fps = fps
         self.playhead_frame = 0
 
-        # Video tracks (V3, V2, V1) and Audio tracks (A1, A2, A3)
+        # Video tracks (V5, V4, V3, V2, V1) and Audio tracks (A1, A2, A3)
         self.video_tracks = [
+            TrackModel("V5"),
+            TrackModel("V4"),
             TrackModel("V3"),
             TrackModel("V2"),
             TrackModel("V1"),

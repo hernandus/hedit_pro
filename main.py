@@ -41,9 +41,9 @@ def main():
     logger.info("[UI] Applying Premiere Pro Charcoal Dark QSS stylesheet.")
     app.setStyleSheet(PREMIERE_DARK_STYLESHEET)
 
-    # 4. Instantiate & Show MainWindow
+    # 4. Instantiate & Show MainWindow (Maximized)
     window = MainWindow()
-    window.show()
+    window.showMaximized()
 
     logger.info("[APP] Event loop running.")
     ret_code = app.exec()
