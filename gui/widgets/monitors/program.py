@@ -86,6 +86,7 @@ class ProgramMonitorWidget(QWidget):
 
         # 2. Video Viewport Frame Canvas
         self.viewport = VideoViewportWidget(placeholder_text="PROGRAM MONITOR (SEQUENCE OUTPUT)")
+        self.viewport.set_original_size(1920, 1080)
         main_layout.addWidget(self.viewport, stretch=1)
 
         # 3. Controls Layout Row (Fit dropdown | Bounded Controls Group | Cyan TC | Full dropdown)
@@ -125,9 +126,11 @@ class ProgramMonitorWidget(QWidget):
 
         # Left: Fit Dropdown
         self.combo_fit = QComboBox()
-        self.combo_fit.addItems(["Fit", "25%", "50%", "75%", "100%", "150%", "200%"])
+        self.combo_fit.addItems(["Fit", "10%", "25%", "50%", "75%", "100%", "150%", "200%", "400%"])
         self.combo_fit.setFixedSize(62, 24)
         self.combo_fit.setStyleSheet(combo_qss)
+        self.combo_fit.currentTextChanged.connect(self.viewport.set_zoom)
+        self.viewport.zoom_changed.connect(self._on_viewport_zoom_changed)
         controls_layout.addWidget(self.combo_fit)
 
         controls_layout.addStretch(1)
@@ -258,11 +261,39 @@ class ProgramMonitorWidget(QWidget):
         # 4. Scrubber Track (Dashed line + In/Out shaded range + Cyan playhead)
         self.scrubber = MonitorScrubberWidget()
         self.scrubber.seek_requested.connect(self.seek_to_frame)
+        self.scrubber.mark_in_changed.connect(self._on_scrubber_mark_in_changed)
+        self.scrubber.mark_out_changed.connect(self._on_scrubber_mark_out_changed)
+        self.scrubber.clear_marks_requested.connect(self.clear_in_out_marks)
         self.scrubber.set_range(self.total_sequence_frames)
         self.scrubber.set_marks(self.mark_in, self.mark_out)
         main_layout.addWidget(self.scrubber)
 
         self._update_range_display()
+
+    def _on_scrubber_mark_in_changed(self, frame: int):
+        self.mark_in = frame
+        self.has_mark_in = True
+        self._update_range_display()
+
+    def _on_scrubber_mark_out_changed(self, frame: int):
+        self.mark_out = frame
+        self.has_mark_out = True
+        self._update_range_display()
+
+    def clear_in_out_marks(self):
+        """Reset In/Out marks to full sequence range and clear mark flags."""
+        self.mark_in = 0
+        self.mark_out = self.total_sequence_frames
+        self.has_mark_in = False
+        self.has_mark_out = False
+        self.scrubber.set_marks(self.mark_in, self.mark_out)
+        self._update_range_display()
+
+    def _on_viewport_zoom_changed(self, mode: str):
+        """Sync combo_fit dropdown text when zoom changes via viewport interaction."""
+        self.combo_fit.blockSignals(True)
+        self.combo_fit.setCurrentText(mode)
+        self.combo_fit.blockSignals(False)
 
     def _on_proxy_toggled(self, checked: bool):
         """Toggle PROXIES ON / PROXIES OFF state."""
@@ -358,6 +389,22 @@ class ProgramMonitorWidget(QWidget):
 
     def start_playback(self):
         """Start or resume playback."""
+        has_in_out = self.has_mark_in and self.has_mark_out
+        if self.loop_enabled and has_in_out:
+            end_limit = self.mark_out
+            start_limit = self.mark_in
+        else:
+            end_limit = self.total_sequence_frames
+            start_limit = 0
+
+        # Auto-rewind to start_limit if Play is triggered while at/past end_limit
+        if self.playback_speed > 0 and self.current_frame >= end_limit:
+            self.seek_to_frame(start_limit)
+
+        # Auto-jump to end_limit if Reverse Play is triggered while at/before start_limit
+        elif self.playback_speed < 0 and self.current_frame <= start_limit:
+            self.seek_to_frame(end_limit)
+
         self.is_playing = True
         self.btn_play.setIcon(self.icon_stop)
         interval = max(5, int(1000 / (self.fps * abs(self.playback_speed))))

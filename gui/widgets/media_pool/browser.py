@@ -338,9 +338,24 @@ class MediaPoolWidget(QWidget):
         self._populate_sample_data()
 
     def _populate_sample_data(self):
-        """Initial sample structure containing default bins."""
+        """Initial sample structure containing default bins and pre-loaded test videos."""
         self.create_bin("Audio")
-        self.create_bin("Footage")
+        footage_bin = self.create_bin("Footage")
+
+        test_project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../test_project"))
+        default_files = [
+            "4D Kahu Road, Panmure - Yvette Brenan.mp4",
+            "C0668.mp4",
+            "C0669.mp4"
+        ]
+
+        for filename in default_files:
+            file_path = os.path.join(test_project_dir, filename)
+            if os.path.exists(file_path):
+                self.add_media_item(file_path, parent_item=footage_bin)
+
+        if footage_bin:
+            self.tree_view.expand(footage_bin.index())
 
     def set_project_name(self, name: str):
         self.project_name = name

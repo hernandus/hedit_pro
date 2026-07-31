@@ -3,7 +3,7 @@ Custom Monitor Scrubber Widget for Hedit Pro.
 Draws dashed timeline track, shaded In/Out mark selection range, and cyan playhead indicator.
 """
 
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QWidget, QMenu
 from PySide6.QtCore import Qt, Signal, QPointF, QRectF
 from PySide6.QtGui import QPainter, QColor, QPen
 from PySide6.QtSvg import QSvgRenderer
@@ -20,6 +20,7 @@ class MonitorScrubberWidget(QWidget):
     seek_requested = Signal(int)
     mark_in_changed = Signal(int)
     mark_out_changed = Signal(int)
+    clear_marks_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -31,11 +32,37 @@ class MonitorScrubberWidget(QWidget):
         self.mark_in = 0
         self.mark_out = self.total_frames
         self.is_dragging = False
+        self.drag_mode = None  # None, "in", "out", "playhead"
+
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
 
         # Load SVG icon renderers
         self.renderer_mark_in = QSvgRenderer(os.path.join(MONITOR_ICONS_DIR, "monitor_icon_mark_in.svg"))
         self.renderer_mark_out = QSvgRenderer(os.path.join(MONITOR_ICONS_DIR, "monitor_icon_mark_out.svg"))
         self.renderer_playhead = QSvgRenderer(os.path.join(MONITOR_ICONS_DIR, "monitor_icon_playhead.svg"))
+
+    def _show_context_menu(self, pos):
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #181818;
+                color: #D4D4D4;
+                border: 1px solid #2B2B2B;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 4px 16px;
+                font-size: 11px;
+            }
+            QMenu::item:selected {
+                background-color: #282828;
+                color: #00A8FF;
+            }
+        """)
+        action_clear = menu.addAction("Clear In and Out")
+        action_clear.triggered.connect(lambda: self.clear_marks_requested.emit())
+        menu.exec(self.mapToGlobal(pos))
 
     def set_range(self, total_frames: int):
         self.total_frames = max(1, total_frames)
@@ -57,22 +84,88 @@ class MonitorScrubberWidget(QWidget):
         ratio = max(0.0, min(x / w, 1.0))
         return int(round(ratio * self.total_frames))
 
+    def _get_hit_target(self, x: float) -> str:
+        """Determines if mouse position hits Mark In handle, Mark Out handle, or track playhead."""
+        w = float(self.width())
+        if w <= 0 or self.total_frames <= 0:
+            return "playhead"
+
+        in_x = (float(self.mark_in) / float(self.total_frames)) * w
+        out_x = (float(self.mark_out) / float(self.total_frames)) * w
+
+        hit_margin = 8.0  # Tolerance margin around handles
+
+        # Priority hit detection for In/Out handle grips
+        if abs(x - in_x) <= hit_margin:
+            return "in"
+        if abs(x - out_x) <= hit_margin:
+            return "out"
+
+        return "playhead"
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.is_dragging = True
-            frame = self._frame_from_pos(event.position().x())
-            self.seek_requested.emit(frame)
+            pos_x = event.position().x()
+            self.drag_mode = self._get_hit_target(pos_x)
+            frame = self._frame_from_pos(pos_x)
+
+            if self.drag_mode == "in":
+                new_in = max(0, min(frame, self.mark_out - 1))
+                self.mark_in = new_in
+                self.mark_in_changed.emit(new_in)
+                self.seek_requested.emit(new_in)
+            elif self.drag_mode == "out":
+                new_out = max(self.mark_in + 1, min(frame, self.total_frames))
+                self.mark_out = new_out
+                self.mark_out_changed.emit(new_out)
+                self.seek_requested.emit(new_out)
+            else:
+                self.seek_requested.emit(frame)
+
+            self.update()
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if self.is_dragging:
-            frame = self._frame_from_pos(event.position().x())
-            self.seek_requested.emit(frame)
+        pos_x = event.position().x()
+
+        if not self.is_dragging:
+            hit = self._get_hit_target(pos_x)
+            if hit in ("in", "out"):
+                self.setCursor(Qt.SizeHorCursor)
+            else:
+                self.setCursor(Qt.ArrowCursor)
+        else:
+            frame = self._frame_from_pos(pos_x)
+            if self.drag_mode == "in":
+                new_in = max(0, min(frame, self.mark_out - 1))
+                if new_in != self.mark_in:
+                    self.mark_in = new_in
+                    self.mark_in_changed.emit(new_in)
+                    self.seek_requested.emit(new_in)
+                    self.update()
+            elif self.drag_mode == "out":
+                new_out = max(self.mark_in + 1, min(frame, self.total_frames))
+                if new_out != self.mark_out:
+                    self.mark_out = new_out
+                    self.mark_out_changed.emit(new_out)
+                    self.seek_requested.emit(new_out)
+                    self.update()
+            elif self.drag_mode == "playhead":
+                self.seek_requested.emit(frame)
+
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.is_dragging = False
+            self.drag_mode = None
+            pos_x = event.position().x()
+            hit = self._get_hit_target(pos_x)
+            if hit in ("in", "out"):
+                self.setCursor(Qt.SizeHorCursor)
+            else:
+                self.setCursor(Qt.ArrowCursor)
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event):
