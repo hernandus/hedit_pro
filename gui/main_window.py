@@ -13,6 +13,7 @@ from PySide6.QtCore import Qt, QSize, QEvent
 from PySide6.QtGui import QIcon, QKeySequence, QAction, QShortcut
 
 from core.engine import MLTEngine
+from core.playback import PlaybackController
 from core.logger import get_logger
 from gui.widgets.monitors.source import SourceMonitorWidget
 from gui.widgets.monitors.program import ProgramMonitorWidget
@@ -46,8 +47,9 @@ class MainWindow(QMainWindow):
 
         logger.info("[UI] Initializing MainWindow layout...")
 
-        # Init MLT Engine
+        # Init MLT Engine & Playback Controller
         self.engine = MLTEngine()
+        self.playback_controller = PlaybackController(self)
 
         # Enable Dock Nesting and Tabs
         self.setDockOptions(
@@ -65,6 +67,10 @@ class MainWindow(QMainWindow):
         self.connect_signals()
         self.setup_shortcuts()
         self.setup_focus_tracking()
+
+        # Sync VU meter with playback controller
+        self.playback_controller.playback_started.connect(lambda t: self.vu_meter.start_meter())
+        self.playback_controller.playback_stopped.connect(lambda t: self.vu_meter.stop_meter())
 
         logger.info("[UI] MainWindow layout and docks initialized successfully.")
 
@@ -243,6 +249,12 @@ class MainWindow(QMainWindow):
                 w_new.style().unpolish(w_new)
                 w_new.style().polish(w_new)
 
+            # Update playback target in PlaybackController
+            if dock == self.dock_source:
+                self.playback_controller.set_active_target(self.source_monitor, "Source Monitor")
+            elif dock in (self.dock_program, self.dock_timeline):
+                self.playback_controller.set_active_target(self.program_monitor, "Program Monitor")
+
     def connect_signals(self):
         # Pass sequence model to Program Monitor for timeline preview rendering
         self.program_monitor.set_sequence_model(self.timeline_widget.model)
@@ -259,18 +271,18 @@ class MainWindow(QMainWindow):
 
 
     def setup_shortcuts(self):
-        # Spacebar: Play/Pause Program Monitor
+        # Spacebar: Play/Pause active monitor target
         self.shortcut_space = QShortcut(QKeySequence(Qt.Key_Space), self)
-        self.shortcut_space.activated.connect(self._toggle_program_play)
+        self.shortcut_space.activated.connect(self.playback_controller.toggle_play)
 
         # Export Media Shortcut: Ctrl+M
         self.shortcut_export = QShortcut(QKeySequence("Ctrl+M"), self)
         self.shortcut_export.activated.connect(self.on_open_export_dialog)
 
-        # J-K-L Shuttle Navigation
-        QShortcut(QKeySequence("j"), self).activated.connect(self._shuttle_j)
-        QShortcut(QKeySequence("k"), self).activated.connect(self._shuttle_k)
-        QShortcut(QKeySequence("l"), self).activated.connect(self._shuttle_l)
+        # J-K-L Shuttle Navigation via PlaybackController
+        QShortcut(QKeySequence("j"), self).activated.connect(self.playback_controller.shuttle_reverse)
+        QShortcut(QKeySequence("k"), self).activated.connect(self.playback_controller.shuttle_stop)
+        QShortcut(QKeySequence("l"), self).activated.connect(self.playback_controller.shuttle_forward)
 
         # Tools Shortcuts: V, C, B
         QShortcut(QKeySequence("v"), self).activated.connect(lambda: self.timeline_widget.set_active_tool("V"))
@@ -281,35 +293,11 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("i"), self).activated.connect(self.source_monitor.set_mark_in)
         QShortcut(QKeySequence("o"), self).activated.connect(self.source_monitor.set_mark_out)
 
-    def _toggle_program_play(self):
-        if not self.program_monitor.is_playing:
-            logger.info("[TRANSPORT] Playback started via Spacebar.")
-            self.program_monitor.shuttle_forward()
-            self.vu_meter.start_meter()
-        else:
-            logger.info("[TRANSPORT] Playback stopped via Spacebar.")
-            self.program_monitor.shuttle_stop()
-            self.vu_meter.stop_meter()
-
-    def _shuttle_j(self):
-        logger.info(f"[TRANSPORT] Shuttle Reverse (J) - Speed: {self.program_monitor.playback_speed}x.")
-        self.program_monitor.shuttle_reverse()
-        self.vu_meter.start_meter()
-
-    def _shuttle_k(self):
-        logger.info("[TRANSPORT] Shuttle Stop (K).")
-        self.program_monitor.shuttle_stop()
-        self.vu_meter.stop_meter()
-
-    def _shuttle_l(self):
-        logger.info(f"[TRANSPORT] Shuttle Forward (L) - Speed: {self.program_monitor.playback_speed}x.")
-        self.program_monitor.shuttle_forward()
-        self.vu_meter.start_meter()
-
     def _on_media_double_clicked(self, file_path: str):
         logger.info(f"[MEDIA] Loading media '{file_path}' into Source Monitor.")
         self.source_monitor.load_clip(file_path)
         self.dock_source.raise_()
+        self._set_active_dock(self.dock_source)
         self.lbl_status.setText(f"Loaded clip into Source Monitor: {file_path}")
 
     def _on_insert_clip_to_timeline(self, clip_data: dict):

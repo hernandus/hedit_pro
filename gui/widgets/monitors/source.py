@@ -40,6 +40,10 @@ class SourceMonitorWidget(QWidget):
         self.mark_in = 0
         self.mark_out = self.total_frames
         self.is_playing = False
+        self.playback_speed = 1.0
+        self.loop_enabled = False
+        self.has_mark_in = False
+        self.has_mark_out = False
         self.clip_data = None
 
         # Proxy state ─────────────────────────────────────────────────────────
@@ -69,6 +73,8 @@ class SourceMonitorWidget(QWidget):
         self.icon_mark_out = QIcon(os.path.join(MONITOR_ICONS_DIR, "monitor_icon_mark_out.svg"))
         self.icon_play = QIcon(os.path.join(MONITOR_ICONS_DIR, "monitor_icon_play.svg"))
         self.icon_stop = QIcon(os.path.join(MONITOR_ICONS_DIR, "monitor_icon_stop.svg"))
+        self.icon_play_loop_disabled = QIcon(os.path.join(MONITOR_ICONS_DIR, "monitor_icon_play_loop_disabled.svg"))
+        self.icon_play_loop_enabled = QIcon(os.path.join(MONITOR_ICONS_DIR, "monitor_icon_play_loop_enabled.svg"))
         self.icon_insert = QIcon(os.path.join(MONITOR_ICONS_DIR, "monitor_icon_insert.svg"))
         self.icon_overwrite = QIcon(os.path.join(MONITOR_ICONS_DIR, "monitor_icon_overwrite.svg"))
 
@@ -189,6 +195,15 @@ class SourceMonitorWidget(QWidget):
         self.btn_play.setToolTip("Play/Pause (Space)")
         self.btn_play.clicked.connect(self.toggle_play)
         center_layout.addWidget(self.btn_play)
+
+        # Loop Playback (right of Play)
+        self.btn_loop = QToolButton()
+        self.btn_loop.setIcon(self.icon_play_loop_disabled)
+        self.btn_loop.setFixedSize(20, 20)
+        self.btn_loop.setIconSize(QSize(15, 15))
+        self.btn_loop.setToolTip("Loop Playback (OFF)")
+        self.btn_loop.clicked.connect(self.toggle_loop)
+        center_layout.addWidget(self.btn_loop)
 
         # Spacing between Play and Insert
         center_layout.addSpacing(12)
@@ -389,6 +404,8 @@ class SourceMonitorWidget(QWidget):
         self.current_frame = 0
         self.mark_in = 0
         self.mark_out = self.total_frames
+        self.has_mark_in = False
+        self.has_mark_out = False
 
         self.play_timer.setInterval(max(5, int(1000 / self.fps)))
         self.title_label.setText(f"Source: {self.clip_data['name']}")
@@ -401,32 +418,78 @@ class SourceMonitorWidget(QWidget):
 
     def set_mark_in(self):
         self.mark_in = self.current_frame
+        self.has_mark_in = True
         if self.mark_out <= self.mark_in:
             self.mark_out = self.total_frames
+            self.has_mark_out = False
         self.scrubber.set_marks(self.mark_in, self.mark_out)
         self.update_timecode_display()
 
     def set_mark_out(self):
         self.mark_out = self.current_frame
+        self.has_mark_out = True
         if self.mark_in >= self.mark_out:
             self.mark_in = 0
+            self.has_mark_in = False
         self.scrubber.set_marks(self.mark_in, self.mark_out)
         self.update_timecode_display()
 
+        # If loop is ON and both marks exist during active playback, immediately jump to mark_in and loop
+        if self.is_playing and self.loop_enabled and self.has_mark_in and self.has_mark_out:
+            self.seek_to_frame(self.mark_in)
+            if self.playback_speed == 1.0 and self.cap and self.cap.isOpened():
+                self.player.play()
+
     def toggle_play(self):
-        self.is_playing = not self.is_playing
         if self.is_playing:
-            self.btn_play.setIcon(self.icon_stop)
-            if self.cap and self.cap.isOpened():
-                self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
+            self.shuttle_stop()
+        else:
+            self.shuttle_forward()
+
+    def shuttle_reverse(self):
+        """J key: reverse playback or increase reverse speed."""
+        if self.playback_speed > 0:
+            self.playback_speed = -1.0
+        else:
+            self.playback_speed = max(-4.0, self.playback_speed * 2.0)
+        self.start_playback()
+
+    def shuttle_stop(self):
+        """K key: stop playback."""
+        self.playback_speed = 1.0
+        self.stop_playback()
+
+    def shuttle_forward(self):
+        """L key: forward playback or increase forward speed."""
+        if self.playback_speed < 0 or not self.is_playing:
+            self.playback_speed = 1.0
+        else:
+            self.playback_speed = min(4.0, self.playback_speed * 2.0)
+        self.start_playback()
+
+    def start_playback(self):
+        """Start or resume playback."""
+        self.is_playing = True
+        self.btn_play.setIcon(self.icon_stop)
+        interval = max(5, int(1000 / (self.fps * abs(self.playback_speed))))
+        self.play_timer.setInterval(interval)
+
+        if self.playback_speed == 1.0 and self.cap and self.cap.isOpened():
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
             pos_ms = int((self.current_frame / self.fps) * 1000)
             self.player.setPosition(pos_ms)
             self.player.play()
-            self.play_timer.start()
         else:
-            self.btn_play.setIcon(self.icon_play)
             self.player.pause()
-            self.play_timer.stop()
+
+        self.play_timer.start()
+
+    def stop_playback(self):
+        """Stop or pause playback."""
+        self.is_playing = False
+        self.btn_play.setIcon(self.icon_play)
+        self.player.pause()
+        self.play_timer.stop()
 
     def step_back(self):
         self.seek_to_frame(max(0, self.current_frame - 1))
@@ -453,28 +516,79 @@ class SourceMonitorWidget(QWidget):
         self.scrubber.set_frame(frame)
         self.update_timecode_display()
 
+    def toggle_loop(self, checked: bool = None):
+        if checked is None or (isinstance(checked, bool) and self.sender() is not None):
+            self.loop_enabled = not self.loop_enabled
+        else:
+            self.loop_enabled = checked
+
+        if self.loop_enabled:
+            self.btn_loop.setIcon(self.icon_play_loop_enabled)
+            self.btn_loop.setToolTip("Loop Playback (ON)")
+        else:
+            self.btn_loop.setIcon(self.icon_play_loop_disabled)
+            self.btn_loop.setToolTip("Loop Playback (OFF)")
+
     def _on_timer_tick(self):
-        """Ultra-fast sequential frame playback with synced audio output."""
+        """Sequential frame playback supporting forward/reverse shuttle and conditional loop."""
         if not self.cap or not self.cap.isOpened():
             return
 
-        if self.current_frame >= self.total_frames or self.current_frame >= self.mark_out:
-            self.seek_to_frame(self.mark_in)
-            return
+        has_in_out = self.has_mark_in and self.has_mark_out
 
-        ret, mat_frame = self.cap.read()
-        if ret and mat_frame is not None:
-            rgb_frame = cv2.cvtColor(mat_frame, cv2.COLOR_BGR2RGB)
-            h, w, ch = rgb_frame.shape
-            qimg = QImage(rgb_frame.data, w, h, w * ch, QImage.Format_RGB888)
-            pixmap = QPixmap.fromImage(qimg)
-            self.viewport.set_pixmap(pixmap)
+        if self.playback_speed > 0:
+            end_limit = self.mark_out if (self.loop_enabled and has_in_out) else self.total_frames
+            start_limit = self.mark_in if (self.loop_enabled and has_in_out) else 0
 
-            self.current_frame += 1
-            self.scrubber.set_frame(self.current_frame)
-            self.update_timecode_display()
+            if self.current_frame >= end_limit:
+                if self.loop_enabled and has_in_out:
+                    self.seek_to_frame(start_limit)
+                    if self.is_playing and self.playback_speed == 1.0:
+                        self.player.play()
+                    return
+                else:
+                    self.shuttle_stop()
+                    self.seek_to_frame(self.total_frames)
+                    return
+
+            if self.playback_speed == 1.0:
+                ret, mat_frame = self.cap.read()
+                if ret and mat_frame is not None:
+                    rgb_frame = cv2.cvtColor(mat_frame, cv2.COLOR_BGR2RGB)
+                    h, w, ch = rgb_frame.shape
+                    qimg = QImage(rgb_frame.data, w, h, w * ch, QImage.Format_RGB888)
+                    pixmap = QPixmap.fromImage(qimg)
+                    self.viewport.set_pixmap(pixmap)
+
+                    self.current_frame += 1
+                    self.scrubber.set_frame(self.current_frame)
+                    self.update_timecode_display()
+                else:
+                    if self.loop_enabled and has_in_out:
+                        self.seek_to_frame(start_limit)
+                        if self.is_playing and self.playback_speed == 1.0:
+                            self.player.play()
+                    else:
+                        self.shuttle_stop()
+            else:
+                step = int(abs(self.playback_speed))
+                self.seek_to_frame(min(end_limit, self.current_frame + step))
         else:
-            self.seek_to_frame(self.mark_in)
+            start_limit = self.mark_in if (self.loop_enabled and has_in_out) else 0
+            end_limit = self.mark_out if (self.loop_enabled and has_in_out) else self.total_frames
+
+            if self.current_frame <= start_limit:
+                if self.loop_enabled and has_in_out:
+                    self.seek_to_frame(end_limit)
+                    if self.is_playing and self.playback_speed == 1.0:
+                        self.player.play()
+                    return
+                else:
+                    self.shuttle_stop()
+                    self.seek_to_frame(0)
+                    return
+            step = int(abs(self.playback_speed))
+            self.seek_to_frame(max(0, self.current_frame - step))
 
     def update_timecode_display(self):
         tc = frames_to_timecode(self.current_frame, self.fps)

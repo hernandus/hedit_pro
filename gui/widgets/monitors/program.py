@@ -40,6 +40,8 @@ class ProgramMonitorWidget(QWidget):
         self.is_playing = False
         self.playback_speed = 1.0  # 1.0 = normal, 2.0 = 2x, -1.0 = reverse (J-K-L shuttle)
         self.loop_enabled = False
+        self.has_mark_in = False
+        self.has_mark_out = False
 
         self.sequence_model = None
         self.caps = {}
@@ -65,6 +67,8 @@ class ProgramMonitorWidget(QWidget):
         self.icon_mark_out = QIcon(os.path.join(MONITOR_ICONS_DIR, "monitor_icon_mark_out.svg"))
         self.icon_play = QIcon(os.path.join(MONITOR_ICONS_DIR, "monitor_icon_play.svg"))
         self.icon_stop = QIcon(os.path.join(MONITOR_ICONS_DIR, "monitor_icon_stop.svg"))
+        self.icon_play_loop_disabled = QIcon(os.path.join(MONITOR_ICONS_DIR, "monitor_icon_play_loop_disabled.svg"))
+        self.icon_play_loop_enabled = QIcon(os.path.join(MONITOR_ICONS_DIR, "monitor_icon_play_loop_enabled.svg"))
         self.icon_insert = QIcon(os.path.join(MONITOR_ICONS_DIR, "monitor_icon_insert.svg"))
         self.icon_overwrite = QIcon(os.path.join(MONITOR_ICONS_DIR, "monitor_icon_overwrite.svg"))
 
@@ -186,6 +190,15 @@ class ProgramMonitorWidget(QWidget):
         self.btn_play.clicked.connect(self.toggle_play_state)
         center_layout.addWidget(self.btn_play)
 
+        # Loop Playback (right of Play)
+        self.btn_loop = QToolButton()
+        self.btn_loop.setIcon(self.icon_play_loop_disabled)
+        self.btn_loop.setFixedSize(20, 20)
+        self.btn_loop.setIconSize(QSize(15, 15))
+        self.btn_loop.setToolTip("Loop Playback (OFF)")
+        self.btn_loop.clicked.connect(self.toggle_loop)
+        center_layout.addWidget(self.btn_loop)
+
         # Spacing between Play and Insert
         center_layout.addSpacing(12)
 
@@ -283,8 +296,10 @@ class ProgramMonitorWidget(QWidget):
     def set_mark_in(self):
         """Set In mark at current playhead position."""
         self.mark_in = self.current_frame
+        self.has_mark_in = True
         if self.mark_out < self.mark_in:
             self.mark_out = self.total_sequence_frames
+            self.has_mark_out = False
         self.scrubber.set_marks(self.mark_in, self.mark_out)
         self._update_range_display()
         logger.info(f"[PROGRAM MONITOR] Set Mark In at frame {self.mark_in}")
@@ -292,9 +307,16 @@ class ProgramMonitorWidget(QWidget):
     def set_mark_out(self):
         """Set Out mark at current playhead position."""
         self.mark_out = max(self.mark_in, self.current_frame)
+        self.has_mark_out = True
         self.scrubber.set_marks(self.mark_in, self.mark_out)
         self._update_range_display()
         logger.info(f"[PROGRAM MONITOR] Set Mark Out at frame {self.mark_out}")
+
+        # If loop is ON and both marks exist during active playback, immediately jump to mark_in and loop
+        if self.is_playing and self.loop_enabled and self.has_mark_in and self.has_mark_out:
+            self.seek_to_frame(self.mark_in)
+            if self.playback_speed == 1.0 and self.current_audio_path:
+                self.player.play()
 
     def _update_range_display(self):
         """Update center range duration timecode display."""
@@ -308,6 +330,10 @@ class ProgramMonitorWidget(QWidget):
             self.shuttle_stop()
         else:
             self.shuttle_forward()
+
+    def toggle_play(self):
+        """Alias for toggle_play_state to fulfill PlaybackTarget protocol."""
+        self.toggle_play_state()
 
     def shuttle_reverse(self):
         """J key: reverse playback or increase reverse speed."""
@@ -349,9 +375,19 @@ class ProgramMonitorWidget(QWidget):
         self.player.pause()
         self.play_timer.stop()
 
-    def toggle_loop(self, checked: bool):
+    def toggle_loop(self, checked: bool = None):
         """Toggle loop playback mode."""
-        self.loop_enabled = checked
+        if checked is None or (isinstance(checked, bool) and self.sender() is not None):
+            self.loop_enabled = not self.loop_enabled
+        else:
+            self.loop_enabled = checked
+
+        if self.loop_enabled:
+            self.btn_loop.setIcon(self.icon_play_loop_enabled)
+            self.btn_loop.setToolTip("Loop Playback (ON)")
+        else:
+            self.btn_loop.setIcon(self.icon_play_loop_disabled)
+            self.btn_loop.setToolTip("Loop Playback (OFF)")
 
     def render_sequence_frame(self, frame_num: int, force_seek: bool = False):
         """Render active timeline sequence video frame at specified sequence frame index."""
@@ -411,20 +447,30 @@ class ProgramMonitorWidget(QWidget):
         self.position_changed.emit(self.current_frame)
 
     def _on_timer_tick(self):
-        """Advance playhead on each timer tick."""
+        """Advance playhead on each timer tick with conditional mark-based loop."""
         step = 1 if self.playback_speed > 0 else -1
         next_frame = self.current_frame + step
 
-        if next_frame >= self.total_sequence_frames:
-            if self.loop_enabled:
-                self.seek_to_frame(0)
+        has_in_out = self.has_mark_in and self.has_mark_out
+        limit_out = self.mark_out if (self.loop_enabled and has_in_out) else self.total_sequence_frames
+        limit_in = self.mark_in if (self.loop_enabled and has_in_out) else 0
+
+        if next_frame >= limit_out:
+            if self.loop_enabled and has_in_out:
+                self.seek_to_frame(limit_in)
+                if self.is_playing and self.playback_speed == 1.0 and self.current_audio_path:
+                    self.player.play()
             else:
                 self.shuttle_stop()
-        elif next_frame < 0:
-            if self.loop_enabled:
-                self.seek_to_frame(self.total_sequence_frames)
+                self.seek_to_frame(limit_out)
+        elif next_frame < limit_in:
+            if self.loop_enabled and has_in_out:
+                self.seek_to_frame(limit_out)
+                if self.is_playing and self.playback_speed == 1.0 and self.current_audio_path:
+                    self.player.play()
             else:
                 self.shuttle_stop()
+                self.seek_to_frame(limit_in)
         else:
             self.current_frame = next_frame
             self.scrubber.blockSignals(True)
